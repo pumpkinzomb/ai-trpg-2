@@ -1,10 +1,22 @@
+"use client";
+
 import { UserNav } from "@/components/auth/user-nav";
 import { ModeToggle } from "@/components/mode-toggle";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Gamepad2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 export function Navbar() {
+  const { toast } = useToast();
+
+  const handleArenaClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    toast({
+      description: "추후 기능 업데이트 됩니다.",
+    });
+  };
+
   return (
     <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex h-16 items-center px-4 max-w-7xl mx-auto">
@@ -23,7 +35,7 @@ export function Navbar() {
                 variant="ghost"
                 className="text-sm font-medium hover:text-primary"
               >
-                소개
+                판타지 세계
               </Button>
             </Link>
             <Link href="/characters">
@@ -34,7 +46,7 @@ export function Navbar() {
                 캐릭터
               </Button>
             </Link>
-            <Link href="/arena">
+            <Link href="/arena" onClick={handleArenaClick}>
               <Button
                 variant="ghost"
                 className="text-sm font-medium hover:text-primary"

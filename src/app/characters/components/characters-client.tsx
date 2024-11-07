@@ -2,20 +2,9 @@
 
 import { useState } from "react";
 import useSWR from "swr";
+import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import {
-  Shield,
-  Swords,
-  User2,
-  Dumbbell,
-  Brain,
-  Heart,
-  Crown,
-  Wallet,
-  UserCircle,
-  Trash2,
-  Plus,
-} from "lucide-react";
+import { Shield, Swords, Crown, Trash2, Plus, ArrowRight } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,46 +19,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
-
-interface Character {
-  id: string;
-  name: string;
-  level: number;
-  race: string;
-  class: string;
-  profileImage: string;
-  experience: number;
-  stats: {
-    strength: number;
-    dexterity: number;
-    constitution: number;
-    intelligence: number;
-    wisdom: number;
-    charisma: number;
-  };
-  hp: {
-    current: number;
-    max: number;
-    hitDice: string;
-  };
-  equipment: {
-    weapon: any;
-    armor: any;
-    shield: any;
-  };
-  arenaStats: {
-    rank: number;
-    rating: number;
-    wins: number;
-    losses: number;
-  };
-  resource: {
-    current: number;
-    max: number;
-    name: string;
-  };
-  gold: number;
-}
+import { Badge } from "@/components/ui/badge";
+import { Character } from "@/app/types";
+import { CardContent, Card } from "@/components/ui/card";
 
 interface PaginationData {
   total: number;
@@ -82,19 +34,120 @@ interface CharactersResponse {
   pagination: PaginationData;
 }
 
-// AC 계산 함수 (예시 - 실제 규칙에 맞게 수정 필요)
-const calculateAC = (character: Character) => {
-  const baseAC = 10;
-  const dexMod = Math.floor((character.stats.dexterity - 10) / 2);
-  const armorBonus = character.equipment.armor ? 2 : 0; // 실제 아이템 효과로 대체 필요
-  const shieldBonus = character.equipment.shield ? 2 : 0; // 실제 아이템 효과로 대체 필요
-  return baseAC + dexMod + armorBonus + shieldBonus;
-};
-
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch characters");
   return res.json();
+};
+
+const calculateAC = (character: Character) => {
+  const dexModifier = Math.floor((character.stats.dexterity - 10) / 2);
+
+  // 갑옷이 없는 경우 기본 AC (10 + Dex)
+  if (!character.equipment.armor) {
+    return 10 + dexModifier;
+  }
+
+  // 갑옷 타입에 따른 AC 계산
+  let baseAC = character.equipment.armor.stats.defense!;
+
+  // 갑옷 타입별 방어도 계산
+  switch (character.equipment.armor.type) {
+    case "light-armor":
+      baseAC += dexModifier;
+      break;
+    case "medium-armor":
+      baseAC += Math.min(dexModifier, 2);
+      break;
+    case "heavy-armor":
+      // Dex 보너스 없음
+      break;
+    default:
+      baseAC += dexModifier; // 기본값은 light armor처럼 처리
+  }
+
+  // 방패 보너스 추가
+  if (character.equipment.shield) {
+    baseAC += character.equipment.shield.stats.defense!;
+  }
+
+  return baseAC;
+};
+
+const resourceColors: Record<
+  string,
+  {
+    bg: string;
+    darkBg: string;
+    indicator: string;
+    text: string;
+    darkText: string;
+  }
+> = {
+  // 마법계열
+  Mana: {
+    bg: "bg-blue-200",
+    darkBg: "dark:bg-blue-950",
+    indicator: "bg-gradient-to-r from-blue-500 to-blue-600",
+    text: "text-blue-600",
+    darkText: "dark:text-blue-400",
+  },
+  // 특수계열
+  Rage: {
+    bg: "bg-orange-200",
+    darkBg: "dark:bg-orange-950",
+    indicator: "bg-gradient-to-r from-orange-500 to-orange-600",
+    text: "text-orange-600",
+    darkText: "dark:text-orange-400",
+  },
+  Ki: {
+    bg: "bg-yellow-200",
+    darkBg: "dark:bg-yellow-950",
+    indicator: "bg-gradient-to-r from-yellow-500 to-yellow-600",
+    text: "text-yellow-600",
+    darkText: "dark:text-yellow-400",
+  },
+  "Divine Power": {
+    bg: "bg-purple-200",
+    darkBg: "dark:bg-purple-950",
+    indicator: "bg-gradient-to-r from-purple-500 to-purple-600",
+    text: "text-purple-600",
+    darkText: "dark:text-purple-400",
+  },
+  Focus: {
+    bg: "bg-emerald-200",
+    darkBg: "dark:bg-emerald-950",
+    indicator: "bg-gradient-to-r from-emerald-500 to-emerald-600",
+    text: "text-emerald-600",
+    darkText: "dark:text-emerald-400",
+  },
+  // 기본계열
+  Stamina: {
+    bg: "bg-slate-200",
+    darkBg: "dark:bg-slate-950",
+    indicator: "bg-gradient-to-r from-slate-500 to-slate-600",
+    text: "text-slate-600",
+    darkText: "dark:text-slate-400",
+  },
+  Energy: {
+    bg: "bg-cyan-200",
+    darkBg: "dark:bg-cyan-950",
+    indicator: "bg-gradient-to-r from-cyan-500 to-cyan-600",
+    text: "text-cyan-600",
+    darkText: "dark:text-cyan-400",
+  },
+};
+
+// 직업별 색상 매핑
+const classColors: { [key: string]: { bg: string; text: string } } = {
+  Warrior: { bg: "from-red-600/10 to-orange-600/10", text: "text-red-600" },
+  Mage: { bg: "from-blue-600/10 to-purple-600/10", text: "text-blue-600" },
+  Rogue: { bg: "from-green-600/10 to-emerald-600/10", text: "text-green-600" },
+  Cleric: { bg: "from-yellow-600/10 to-amber-600/10", text: "text-yellow-600" },
+  Ranger: {
+    bg: "from-emerald-600/10 to-teal-600/10",
+    text: "text-emerald-600",
+  },
 };
 
 export function CharactersClient() {
@@ -117,20 +170,7 @@ export function CharactersClient() {
       });
 
       if (res.ok) {
-        mutate(
-          characterData
-            ? {
-                characters: characterData.characters.filter(
-                  (char) => char.id !== id
-                ),
-                pagination: {
-                  ...characterData.pagination,
-                  total: characterData.pagination.total - 1,
-                },
-              }
-            : undefined,
-          false
-        );
+        mutate();
         toast({
           title: "캐릭터 삭제 완료",
           description: "캐릭터가 성공적으로 삭제되었습니다.",
@@ -153,12 +193,9 @@ export function CharactersClient() {
   if (isLoading) {
     return (
       <div className="container mx-auto py-6 px-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[...Array(6)].map((_, i) => (
-            <div
-              key={i}
-              className="bg-gray-100 rounded-lg p-6 animate-pulse h-[400px]"
-            />
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-48 bg-card rounded-lg animate-pulse" />
           ))}
         </div>
       </div>
@@ -177,220 +214,225 @@ export function CharactersClient() {
 
   const { characters = [], pagination } = characterData || {};
 
-  console.log("characters", characters);
-
   return (
     <div className="container mx-auto py-6 px-4">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            내 캐릭터
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 text-sm">
+          <h1 className="text-2xl font-bold">내 캐릭터</h1>
+          <p className="text-sm text-muted-foreground">
             총 {pagination?.total}개 중 {characters.length}개 표시 중
           </p>
         </div>
         <Button
           onClick={() => router.push("/character/create")}
-          size="lg"
-          className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-medium px-6 shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
+          size="sm"
+          className="gap-2"
         >
-          <Plus className="w-5 h-5" />새 캐릭터 만들기
+          <Plus className="w-4 h-4" />새 캐릭터 만들기
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="space-y-3">
         {characters.map((character) => (
-          <div
-            key={character.id}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition"
+          <Card
+            key={character._id.toString()}
+            className="group relative overflow-hidden hover:bg-accent transition-colors duration-200"
           >
-            <div className="relative">
-              {character.profileImage ? (
-                <img
-                  src={character.profileImage}
-                  alt={character.name}
-                  className="w-full h-48 object-cover"
-                />
-              ) : (
-                <div className="w-full h-48 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                  <UserCircle className="w-20 h-20 text-gray-400 dark:text-gray-500" />
+            <CardContent className="p-0">
+              <div className="flex min-h-[140px]">
+                {" "}
+                {/* 고정 높이를 최소 높이로 변경 */}
+                {/* Left side - Character Image */}
+                <div className="w-[140px] relative overflow-hidden">
+                  <img
+                    src={character.profileImage}
+                    alt={character.name}
+                    className="h-full w-full object-cover absolute inset-0"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
+                  <Badge
+                    className="absolute bottom-2 left-2 bg-background/80 backdrop-blur-sm"
+                    variant="outline"
+                  >
+                    Lv. {character.level}
+                  </Badge>
                 </div>
-              )}
-              <div className="absolute top-2 right-2">
-                <AlertDialog
-                  open={deletingCharacterId === character.id}
-                  onOpenChange={(open) => {
-                    if (!open) setDeletingCharacterId(null);
-                  }}
-                >
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="destructive"
-                      size="icon"
-                      className="rounded-full"
-                      onClick={() => setDeletingCharacterId(character.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        정말 삭제하시겠습니까?
-                      </AlertDialogTitle>
-                      <AlertDialogDescription>
-                        이 작업은 되돌릴 수 없습니다. 캐릭터와 관련된 모든
-                        데이터가 영구적으로 삭제됩니다.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>취소</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => handleDelete(character.id)}
-                        className="bg-red-600 hover:bg-red-700"
+                {/* Right side - Character Info */}
+                <div className="flex-1 p-4 flex flex-col justify-between relative">
+                  {" "}
+                  {/* relative 추가 */}
+                  {/* Top section */}
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h2 className="text-lg font-semibold">
+                          {character.name}
+                        </h2>
+                        <p className="text-sm text-muted-foreground">
+                          {character.race} {character.class}
+                        </p>
+                      </div>
+                      <AlertDialog
+                        open={deletingCharacterId === character._id.toString()}
+                        onOpenChange={(open) => {
+                          if (!open) setDeletingCharacterId(null);
+                        }}
                       >
-                        삭제
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            </div>
-
-            <div className="p-4">
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                    {character.name}
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Level {character.level} {character.race} {character.class}
-                  </p>
-                </div>
-                <div className="flex flex-col items-end">
-                  <div className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-100 px-2 py-1 rounded mb-1">
-                    Lvl {character.level}
-                  </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400">
-                    EXP: {character.experience}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mt-4">
-                <div className="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
-                  <Shield className="w-4 h-4" />
-                  <span>AC: {calculateAC(character)}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Heart className="w-4 h-4 text-red-500" />
-                  <div className="flex-1">
-                    <div className="text-sm text-gray-700 dark:text-gray-300">
-                      HP: {character.hp.current}/{character.hp.max}
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2"
+                            onClick={() =>
+                              setDeletingCharacterId(character._id.toString())
+                            }
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              정말 삭제하시겠습니까?
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              이 작업은 되돌릴 수 없습니다. 캐릭터와 관련된 모든
+                              데이터가 영구적으로 삭제됩니다.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>취소</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() =>
+                                handleDelete(character._id.toString())
+                              }
+                              className="bg-red-600 hover:bg-red-700"
+                            >
+                              삭제
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </div>
-                    <Progress
-                      value={(character.hp.current / character.hp.max) * 100}
-                      className="h-2 bg-red-100 dark:bg-red-950"
-                    />
-                  </div>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4 mt-4">
-                <div className="flex items-center space-x-2">
-                  <Brain className="w-4 h-4 text-purple-500" />
-                  <div className="flex-1">
-                    <div className="text-sm text-gray-700 dark:text-gray-300">
-                      {character.resource.name}: {character.resource.current}/
-                      {character.resource.max}
+                    {/* Status bars */}
+                    <div className="space-y-2 mt-2">
+                      <div className="flex items-center gap-2">
+                        <div className="min-w-[100px] text-sm">HP</div>
+                        <div className="flex-1">
+                          <Progress
+                            value={
+                              (character.hp.current / character.hp.max) * 100
+                            }
+                            className="h-2"
+                          />
+                        </div>
+                        <div className="w-16 text-sm text-muted-foreground text-right">
+                          {character.hp.current}/{character.hp.max}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="min-w-[100px] text-sm">
+                          {character.resource.name}
+                        </div>
+                        <div className="flex-1">
+                          <Progress
+                            value={
+                              (character.resource.current /
+                                character.resource.max) *
+                              100
+                            }
+                            className={cn(
+                              "h-2",
+                              resourceColors[character.resource.name].bg,
+                              resourceColors[character.resource.name].darkBg,
+                              "[&>div]:bg-gradient-to-r",
+                              `[&>div]:${
+                                resourceColors[character.resource.name]
+                                  .indicator
+                              }`
+                            )}
+                          />
+                        </div>
+                        <div
+                          className={cn(
+                            "w-16 text-sm text-right",
+                            resourceColors[character.resource.name].text,
+                            resourceColors[character.resource.name].darkText
+                          )}
+                        >
+                          {character.resource.current}/{character.resource.max}
+                        </div>
+                      </div>
                     </div>
-                    <Progress
-                      value={
-                        (character.resource.current / character.resource.max) *
-                        100
+                  </div>
+                  {/* Bottom section - Stats */}
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t">
+                    <div className="flex gap-4 opacity-100">
+                      {" "}
+                      {/* opacity-100 추가 */}
+                      <div className="flex items-center gap-1.5">
+                        <Shield className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm">
+                          {calculateAC(character)} AC
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Crown className="w-4 h-4 text-yellow-500" />
+                        <span className="text-sm">
+                          #{character.arenaStats.rank}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Swords className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm">
+                          {character.arenaStats.wins}W{" "}
+                          {character.arenaStats.losses}L
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="opacity-60 hover:opacity-100 transition-opacity"
+                      onClick={() =>
+                        router.push(`/character/${character._id.toString()}`)
                       }
-                      className="h-2 bg-purple-100 dark:bg-purple-950"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
-                  <Wallet className="w-4 h-4 text-yellow-600" />
-                  <span>{character.gold} GP</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 mt-4">
-                <div className="text-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                  <Dumbbell className="w-4 h-4 mx-auto text-gray-600 dark:text-gray-400" />
-                  <div className="text-sm mt-1 text-gray-700 dark:text-gray-300">
-                    STR {character.stats.strength}
-                  </div>
-                </div>
-                <div className="text-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                  <User2 className="w-4 h-4 mx-auto text-gray-600 dark:text-gray-400" />
-                  <div className="text-sm mt-1 text-gray-700 dark:text-gray-300">
-                    DEX {character.stats.dexterity}
-                  </div>
-                </div>
-                <div className="text-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
-                  <Heart className="w-4 h-4 mx-auto text-gray-600 dark:text-gray-400" />
-                  <div className="text-sm mt-1 text-gray-700 dark:text-gray-300">
-                    CON {character.stats.constitution}
+                    >
+                      <span className="mr-2">자세히 보기</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </Button>
                   </div>
                 </div>
               </div>
-
-              <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <div className="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
-                  <Crown className="w-4 h-4 text-yellow-600" />
-                  <span>Rank {character.arenaStats.rank}</span>
-                </div>
-                <div className="flex items-center space-x-2 text-gray-700 dark:text-gray-300">
-                  <Swords className="w-4 h-4" />
-                  <span>
-                    {character.arenaStats.wins}W {character.arenaStats.losses}L
-                  </span>
-                </div>
-                <Button
-                  variant="ghost"
-                  className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                  onClick={() => router.push(`/characters/${character.id}`)}
-                >
-                  자세히 보기 →
-                </Button>
-              </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
       {characters.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-gray-600">
-            No characters found. Create your first character!
-          </p>
-        </div>
+        <Card className="py-8">
+          <div className="text-center text-muted-foreground">
+            캐릭터가 없습니다. 새로운 캐릭터를 생성해보세요!
+          </div>
+        </Card>
       )}
 
       {pagination && pagination.pages > 1 && (
-        <div className="mt-6 flex justify-center space-x-2">
+        <div className="mt-6 flex justify-center gap-2">
           {[...Array(pagination.pages)].map((_, i) => (
-            <button
+            <Button
               key={i}
+              variant={pagination.page === i + 1 ? "default" : "outline"}
+              size="sm"
               onClick={() => {
                 const url = new URL(window.location.href);
                 url.searchParams.set("page", String(i + 1));
                 router.push(url.pathname + url.search);
               }}
-              className={`px-3 py-1 rounded ${
-                pagination.page === i + 1
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-200 hover:bg-gray-300"
-              }`}
             >
               {i + 1}
-            </button>
+            </Button>
           ))}
         </div>
       )}

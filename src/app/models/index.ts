@@ -8,6 +8,7 @@ export interface IUser extends Document {
   role: string;
   createdAt: Date;
   updatedAt: Date;
+  image: string;
 }
 
 const userSchema = new Schema<IUser>(
@@ -29,6 +30,10 @@ const userSchema = new Schema<IUser>(
       type: String,
       default: "user",
       enum: ["user", "admin"],
+    },
+    image: {
+      type: String,
+      default: "",
     },
   },
   {
@@ -173,7 +178,15 @@ const itemSchema = new Schema(
     name: { type: String, required: true },
     type: {
       type: String,
-      enum: ["weapon", "armor", "shield", "accessory", "consumable"],
+      enum: [
+        "weapon",
+        "light-armor",
+        "medium-armor",
+        "heavy-armor",
+        "shield",
+        "accessory",
+        "consumable",
+      ],
       required: true,
     },
     rarity: {
@@ -234,7 +247,7 @@ export interface ICharacter extends Document {
     type: "passive" | "active";
     effect: string;
   }[];
-  resources: {
+  resource: {
     current: number;
     max: number;
     name: string;
@@ -300,7 +313,14 @@ interface ICombat extends Document {
 
 interface IItem extends Document {
   name: string;
-  type: "weapon" | "armor" | "shield" | "accessory" | "consumable";
+  type:
+    | "weapon"
+    | "light-armor"
+    | "medium-armor"
+    | "heavy-armor"
+    | "shield"
+    | "accessory"
+    | "consumable";
   rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
   stats: {
     damage?: string;

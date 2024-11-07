@@ -16,15 +16,14 @@ export interface Character {
     wisdom: number;
     charisma: number;
   };
-  proficiencies: string[]; // ["athletics", "stealth", "light-armor"] 등
+  proficiencies: string[];
   hp: {
     current: number;
     max: number;
     hitDice: string;
   };
   spells: {
-    // 스펠 시스템 단순화
-    known: string[]; // 스펠 ID 목록
+    known: Spell[];
     slots: {
       level: number;
       total: number;
@@ -32,26 +31,30 @@ export interface Character {
     }[];
   };
   features: {
-    // 직업/종족 특성 단순화
     name: string;
     type: "passive" | "active";
-    effect: string; // "damage:+2", "advantage:stealth" 등 단순한 형태로
+    effect: string;
   }[];
-  equipment: {
-    weapon: Types.ObjectId | null;
-    armor: Types.ObjectId | null;
-    shield: Types.ObjectId | null;
-    accessories: Types.ObjectId[];
+  resource: {
+    current: number;
+    max: number;
+    name: string;
   };
-  inventory: Types.ObjectId[];
+  equipment: {
+    weapon: Item | null;
+    armor: Item | null;
+    shield: Item | null;
+    accessories: Item[];
+  };
+  inventory: Item[];
   gold: number;
   arenaStats: {
-    // 투기장 정보를 캐릭터 내부에 포함
     rank: number;
     rating: number;
     wins: number;
     losses: number;
   };
+  profileImage: string;
 }
 
 export interface Spell {
@@ -103,16 +106,33 @@ export interface Combat {
 export interface Item {
   _id: Types.ObjectId;
   name: string;
-  type: "weapon" | "armor" | "shield" | "accessory" | "consumable";
+  type:
+    | "weapon"
+    | "light-armor"
+    | "medium-armor"
+    | "heavy-armor"
+    | "shield"
+    | "accessory"
+    | "consumable";
   rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
   stats: {
     damage?: string; // "1d8+1" 같은 형식으로
     defense?: number;
-    effects: {
-      type: string; // "advantage", "damage", "skill" 등
-      value: string; // "+2", "stealth", "2d6" 등
-    }[];
+    effects: ItemEffect[];
   };
   requiredLevel: number;
   value: number;
 }
+
+export interface ItemEffect {
+  type: string;
+  value: string;
+}
+
+export type RaceType =
+  | "human"
+  | "dwarf"
+  | "elf"
+  | "halfling"
+  | "dragonborn"
+  | "tiefling";

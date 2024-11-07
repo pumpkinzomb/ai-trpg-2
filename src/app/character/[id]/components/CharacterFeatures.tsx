@@ -9,26 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sparkles, BookOpen } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Spell } from "@/app/types";
 
 interface Feature {
   name: string;
   type: "passive" | "active";
   effect: string;
-}
-
-interface Spell {
-  _id: string;
-  name: string;
-  level: number;
-  school: string;
-  castingTime: string;
-  range: string;
-  effect: {
-    type: string;
-    dice?: string;
-    bonus?: number;
-  };
-  description: string;
 }
 
 interface Props {
@@ -113,7 +99,7 @@ export default function CharacterFeatures({
                           .filter((spell) => spell.level === slot.level)
                           .map((spell) => (
                             <div
-                              key={spell._id}
+                              key={spell._id.toString()}
                               className="p-2 border rounded-lg space-y-1"
                             >
                               <div className="flex items-center justify-between">

@@ -45,19 +45,36 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           role: user.role,
+          image: user.image,
         };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
-        return {
-          ...token,
-          id: user.id,
-          role: user.role,
-        };
+        token.id = user.id;
+        token.role = user.role;
+        token.image = user.image;
       }
+
+      // update 트리거 발생 시 DB에서 최신 정보 조회
+      if (trigger === "update") {
+        try {
+          await dbConnect();
+          const latestUser = await User.findOne({
+            email: token.email,
+          }).lean<IUser>();
+          if (latestUser) {
+            token.name = latestUser.name;
+            token.image = latestUser.image;
+            token.role = latestUser.role;
+          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
@@ -67,6 +84,7 @@ export const authOptions: NextAuthOptions = {
           ...session.user,
           id: token.id,
           role: token.role,
+          image: token.image,
         },
       };
     },
