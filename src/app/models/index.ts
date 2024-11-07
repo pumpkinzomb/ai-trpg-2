@@ -90,6 +90,15 @@ const characterSchema = new Schema(
       wins: { type: Number, required: true, default: 0 },
       losses: { type: Number, required: true, default: 0 },
     },
+    resource: {
+      current: { type: Number, required: true },
+      max: { type: Number, required: true },
+      name: { type: String, required: true }, // "Mana", "Ki", "Rage" 등 클래스별 이름만 다르게
+    },
+    profileImage: {
+      type: String, // base64 이미지 데이터를 저장
+      required: true,
+    },
   },
   {
     timestamps: true,
@@ -191,7 +200,7 @@ const itemSchema = new Schema(
 );
 
 // Interfaces for TypeScript
-interface ICharacter extends Document {
+export interface ICharacter extends Document {
   userId: mongoose.Types.ObjectId;
   name: string;
   level: number;
@@ -225,6 +234,11 @@ interface ICharacter extends Document {
     type: "passive" | "active";
     effect: string;
   }[];
+  resources: {
+    current: number;
+    max: number;
+    name: string;
+  };
   equipment: {
     weapon: mongoose.Types.ObjectId | null;
     armor: mongoose.Types.ObjectId | null;
@@ -239,6 +253,7 @@ interface ICharacter extends Document {
     wins: number;
     losses: number;
   };
+  profileImage: string;
 }
 
 interface ISpell extends Document {

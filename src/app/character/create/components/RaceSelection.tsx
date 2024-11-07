@@ -8,139 +8,35 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import {
-  Shield,
-  Swords,
-  Brain,
-  Heart,
-  Footprints,
-  Eye,
-  Sun,
-  Moon,
-  Mountain,
-  Trees,
-  Crown,
-  Scroll,
-} from "lucide-react";
+import { Eye } from "lucide-react";
 
-export const commonRaces = [
-  {
-    id: "human",
-    name: "Human",
-    icon: <Crown className="w-8 h-8" />,
-    description:
-      "Versatile and ambitious, humans are adaptable to any situation.",
-    traits: [
-      { name: "Ability Scores", value: "All ability scores increase by 1" },
-      { name: "Extra Language", value: "Learn one additional language" },
-      {
-        name: "Skill Versatility",
-        value: "Gain proficiency in one additional skill",
-      },
-    ],
-    size: "Medium",
-    speed: 30,
-    languages: ["Common"],
-  },
-  {
-    id: "dwarf",
-    name: "Dwarf",
-    icon: <Mountain className="w-8 h-8" />,
-    description: "Strong, hardy, and devoted to clan and tradition.",
-    traits: [
-      { name: "Constitution", value: "+2 Constitution" },
-      { name: "Darkvision", value: "60 feet" },
-      {
-        name: "Dwarven Resilience",
-        value: "Advantage on poison saving throws",
-      },
-    ],
-    size: "Medium",
-    speed: 25,
-    languages: ["Common", "Dwarvish"],
-  },
-  {
-    id: "elf",
-    name: "Elf",
-    icon: <Moon className="w-8 h-8" />,
-    description: "Graceful, magical beings with a deep connection to nature.",
-    traits: [
-      { name: "Dexterity", value: "+2 Dexterity" },
-      { name: "Darkvision", value: "60 feet" },
-      { name: "Keen Senses", value: "Proficiency in Perception" },
-    ],
-    size: "Medium",
-    speed: 30,
-    languages: ["Common", "Elvish"],
-  },
-  {
-    id: "halfling",
-    name: "Halfling",
-    icon: <Footprints className="w-8 h-8" />,
-    description: "Small, nimble folk known for their luck and courage.",
-    traits: [
-      { name: "Dexterity", value: "+2 Dexterity" },
-      {
-        name: "Lucky",
-        value: "Reroll 1s on attack rolls, ability checks, and saving throws",
-      },
-      {
-        name: "Brave",
-        value: "Advantage on saving throws against being frightened",
-      },
-    ],
-    size: "Small",
-    speed: 25,
-    languages: ["Common", "Halfling"],
-  },
-];
-
-export const exoticRaces = [
-  {
-    id: "dragonborn",
-    name: "Dragonborn",
-    icon: <Swords className="w-8 h-8" />,
-    description:
-      "Dragon-blooded warriors with breath weapons and proud heritage.",
-    traits: [
-      { name: "Strength", value: "+2 Strength" },
-      { name: "Charisma", value: "+1 Charisma" },
-      {
-        name: "Breath Weapon",
-        value: "Deal dragon-type damage in a 15-foot cone",
-      },
-    ],
-    size: "Medium",
-    speed: 30,
-    languages: ["Common", "Draconic"],
-  },
-  {
-    id: "tiefling",
-    icon: <Scroll className="w-8 h-8" />,
-    name: "Tiefling",
-    description: "Descendants of fiends with magical affinity and dark charm.",
-    traits: [
-      { name: "Charisma", value: "+2 Charisma" },
-      { name: "Intelligence", value: "+1 Intelligence" },
-      { name: "Infernal Legacy", value: "Innate spellcasting abilities" },
-    ],
-    size: "Medium",
-    speed: 30,
-    languages: ["Common", "Infernal"],
-  },
-];
-
-interface RaceSelectionProps {
-  races: typeof commonRaces;
-  onSelect?: (race: (typeof commonRaces)[0]) => void;
+interface Race {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  description: string;
+  traits: Array<{ name: string; value: string }>;
+  size: string;
+  speed: number;
+  languages: string[];
 }
 
-const RaceSelection: React.FC<RaceSelectionProps> = ({ onSelect }) => {
-  const [selectedRace, setSelectedRace] = useState<
-    (typeof commonRaces)[0] | null
-  >(null);
+interface RaceSelectionProps {
+  races: Race[];
+  onSelect?: (race: Race) => void;
+  selectedRaceId?: string;
+}
 
-  const handleRaceSelect = (race: (typeof commonRaces)[0]) => {
+const RaceSelection: React.FC<RaceSelectionProps> = ({
+  races,
+  onSelect,
+  selectedRaceId,
+}) => {
+  const [selectedRace, setSelectedRace] = useState<Race | null>(
+    races.find((race) => race.id === selectedRaceId) || null
+  );
+
+  const handleRaceSelect = (race: Race) => {
     setSelectedRace(race);
     if (onSelect) {
       onSelect(race);
@@ -153,7 +49,7 @@ const RaceSelection: React.FC<RaceSelectionProps> = ({ onSelect }) => {
         <h3 className="text-lg font-semibold">Choose Your Race</h3>
         <ScrollArea className="h-[500px] pr-4">
           <div className="space-y-3">
-            {[...commonRaces, ...exoticRaces].map((race) => (
+            {races.map((race) => (
               <Card
                 key={race.id}
                 className={`cursor-pointer transition-colors hover:bg-accent

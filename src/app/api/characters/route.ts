@@ -4,6 +4,7 @@ import { Character } from "@/app/models";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Types } from "mongoose";
+import { generateImage } from "@/app/utils/aiDrawing";
 
 export async function GET(req: NextRequest) {
   try {
@@ -57,11 +58,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
+    const characterData = await req.json();
     const userId = session.user.id;
 
+    console.log("characterData", characterData);
+
+    // 캐릭터 이미지 생성을 위한 프롬프트 구성
+    const imagePrompt = `
+    a ${characterData.race} ${characterData.class} named ${characterData.name},
+    full body shot, 
+    fantasy character portrait
+  `.trim();
+
+    const profileImage = await generateImage(imagePrompt);
+
     const character = await Character.create({
-      ...body,
+      ...characterData,
+      profileImage,
       userId: new Types.ObjectId(userId),
     });
 

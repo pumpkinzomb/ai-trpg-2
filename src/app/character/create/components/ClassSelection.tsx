@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -8,8 +8,8 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Shield,
   Wand2,
   Music,
   Leaf,
@@ -18,31 +18,55 @@ import {
   Swords,
   Crown,
   Crosshair,
+  Eye,
 } from "lucide-react";
 
-export const classes = [
+export interface ClassFeature {
+  name: string;
+  value: string;
+}
+
+export interface ClassProficiencies {
+  armor: string[];
+  weapons: string[];
+  tools: string[];
+  skills: number;
+  skillChoices: string[];
+}
+
+export interface CharacterClass {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  description: string;
+  hitDice: string;
+  primaryAbility: string;
+  savingThrows: string[];
+  features: ClassFeature[];
+  proficiencies: ClassProficiencies;
+}
+
+export const classes: CharacterClass[] = [
   {
     id: "barbarian",
     name: "Barbarian",
     icon: <Swords className="w-8 h-8" />,
-    description:
-      "Fierce warriors who enter a battle rage, fueled by primal instincts.",
+    description: "원시적 본능에 의해 전투 분노를 일으키는 용맹한 전사들.",
     hitDice: "d12",
     primaryAbility: "Strength",
     savingThrows: ["Strength", "Constitution"],
     features: [
       {
         name: "Rage",
-        value: "Enter a powerful battle rage for enhanced combat abilities",
+        value: "강력한 전투 분노 상태에 진입하여 전투 능력 강화",
       },
       {
         name: "Unarmored Defense",
-        value: "Gain AC bonus from Constitution when not wearing armor",
+        value: "갑옷을 입지 않았을 때 체력을 통해 방어도 보너스 획득",
       },
       {
         name: "Reckless Attack",
-        value:
-          "Gain advantage on attacks at the cost of enemies having advantage against you",
+        value: "적이 자신을 공격할 때 이점을 주는 대가로 공격에 이점 획득",
       },
     ],
     proficiencies: {
@@ -64,17 +88,16 @@ export const classes = [
     id: "bard",
     name: "Bard",
     icon: <Music className="w-8 h-8" />,
-    description:
-      "Magical entertainers whose music weaves magic and inspires allies.",
+    description: "음악으로 마법을 엮고 동료들을 고무시키는 마법 예능인.",
     hitDice: "d8",
     primaryAbility: "Charisma",
     savingThrows: ["Dexterity", "Charisma"],
     features: [
-      { name: "Bardic Inspiration", value: "Grant inspiration dice to allies" },
-      { name: "Spellcasting", value: "Cast bard spells using Charisma" },
+      { name: "Bardic Inspiration", value: "동료들에게 영감 주사위 부여" },
+      { name: "Spellcasting", value: "매력을 사용하여 바드 주문 시전" },
       {
         name: "Jack of All Trades",
-        value: "Add half proficiency bonus to unproficient ability checks",
+        value: "숙련되지 않은 능력 판정에 절반의 숙련 보너스 추가",
       },
     ],
     proficiencies: {
@@ -113,15 +136,14 @@ export const classes = [
     id: "druid",
     name: "Druid",
     icon: <Leaf className="w-8 h-8" />,
-    description:
-      "Priests of nature who wield natural magic and can shapeshift.",
+    description: "자연의 마법을 다루고 변신할 수 있는 자연의 사제들.",
     hitDice: "d8",
     primaryAbility: "Wisdom",
     savingThrows: ["Intelligence", "Wisdom"],
     features: [
-      { name: "Druidic", value: "Speak the secret language of druids" },
-      { name: "Spellcasting", value: "Cast druid spells using Wisdom" },
-      { name: "Wild Shape", value: "Transform into different animal forms" },
+      { name: "Druidic", value: "드루이드의 비밀 언어를 구사" },
+      { name: "Spellcasting", value: "지혜를 사용하여 드루이드 주문 시전" },
+      { name: "Wild Shape", value: "다양한 동물 형태로 변신" },
     ],
     proficiencies: {
       armor: ["Light", "Medium", "Shields"],
@@ -155,21 +177,20 @@ export const classes = [
     id: "monk",
     name: "Monk",
     icon: <Crown className="w-8 h-8" />,
-    description:
-      "Masters of martial arts who harness the power of body and soul.",
+    description: "신체와 영혼의 힘을 다스리는 무술의 달인.",
     hitDice: "d8",
     primaryAbility: "Dexterity & Wisdom",
     savingThrows: ["Strength", "Dexterity"],
     features: [
       {
         name: "Unarmored Defense",
-        value: "Gain AC bonus from Wisdom when not wearing armor",
+        value: "갑옷을 입지 않았을 때 지혜를 통해 방어도 보너스 획득",
       },
       {
         name: "Martial Arts",
-        value: "Use Dexterity for unarmed strikes and monk weapons",
+        value: "맨손 공격과 승려 무기에 민첩을 사용",
       },
-      { name: "Ki", value: "Harness magical energy for special abilities" },
+      { name: "Ki", value: "특수 능력을 위한 마법 에너지 사용" },
     ],
     proficiencies: {
       armor: [],
@@ -191,19 +212,19 @@ export const classes = [
     name: "Paladin",
     icon: <Sun className="w-8 h-8" />,
     description:
-      "Holy warriors bound by sacred oaths to uphold justice and righteousness.",
+      "정의와 의로움을 수호하기 위해 신성한 맹세로 묶인 성스러운 전사.",
     hitDice: "d10",
     primaryAbility: "Strength & Charisma",
     savingThrows: ["Wisdom", "Charisma"],
     features: [
-      { name: "Divine Sense", value: "Detect celestials, fiends, and undead" },
+      { name: "Divine Sense", value: "천상의 존재, 악마, 언데드를 감지" },
       {
         name: "Lay on Hands",
-        value: "Pool of healing power to cure wounds and diseases",
+        value: "상처와 질병을 치료하는 치유의 힘",
       },
       {
         name: "Divine Smite",
-        value: "Channel divine energy into powerful weapon strikes",
+        value: "신성한 에너지를 강력한 무기 공격에 주입",
       },
     ],
     proficiencies: {
@@ -225,20 +246,20 @@ export const classes = [
     id: "ranger",
     name: "Ranger",
     icon: <Crosshair className="w-8 h-8" />,
-    description: "Warriors of the wilderness, skilled in tracking and hunting.",
+    description: "추적과 사냥에 능숙한 황야의 전사.",
     hitDice: "d10",
     primaryAbility: "Dexterity & Wisdom",
     savingThrows: ["Strength", "Dexterity"],
     features: [
       {
         name: "Favored Enemy",
-        value: "Advantage against certain types of creatures",
+        value: "특정 유형의 생물에 대한 전투 이점 획득",
       },
       {
         name: "Natural Explorer",
-        value: "Expert at navigating specific types of terrain",
+        value: "특정 지형에서의 전문적인 탐험 능력",
       },
-      { name: "Spellcasting", value: "Cast ranger spells using Wisdom" },
+      { name: "Spellcasting", value: "지혜를 사용하여 레인저 주문 시전" },
     ],
     proficiencies: {
       armor: ["Light", "Medium", "Shields"],
@@ -262,16 +283,16 @@ export const classes = [
     name: "Sorcerer",
     icon: <Wand2 className="w-8 h-8" />,
     description:
-      "Spellcasters who draw on inherent magic from a gift or bloodline.",
+      "천부적인 재능이나 혈통에서 비롯된 내재된 마법을 사용하는 마법사.",
     hitDice: "d6",
     primaryAbility: "Charisma",
     savingThrows: ["Constitution", "Charisma"],
     features: [
-      { name: "Spellcasting", value: "Cast sorcerer spells using Charisma" },
-      { name: "Sorcerous Origin", value: "Choose source of magical power" },
+      { name: "Spellcasting", value: "매력을 사용하여 소서러 주문 시전" },
+      { name: "Sorcerous Origin", value: "마법력의 원천 선택" },
       {
         name: "Font of Magic",
-        value: "Gain sorcery points to fuel magical effects",
+        value: "마법 효과를 위한 소서리 포인트 획득",
       },
     ],
     proficiencies: {
@@ -299,14 +320,14 @@ export const classes = [
     id: "warlock",
     name: "Warlock",
     icon: <Moon className="w-8 h-8" />,
-    description: "Wielders of magic granted by an otherworldly patron.",
+    description: "이계의 후원자로부터 받은 마법을 다루는 자.",
     hitDice: "d8",
     primaryAbility: "Charisma",
     savingThrows: ["Wisdom", "Charisma"],
     features: [
-      { name: "Otherworldly Patron", value: "Form pact with powerful entity" },
-      { name: "Pact Magic", value: "Cast warlock spells using Charisma" },
-      { name: "Eldritch Invocations", value: "Gain supernatural abilities" },
+      { name: "Otherworldly Patron", value: "강력한 존재와 계약 체결" },
+      { name: "Pact Magic", value: "매력을 사용하여 워락 주문 시전" },
+      { name: "Eldritch Invocations", value: "초자연적 능력 획득" },
     ],
     proficiencies: {
       armor: ["Light"],
@@ -327,23 +348,63 @@ export const classes = [
 ];
 
 interface ClassSelectionProps {
-  onSelect?: (selectedClass: (typeof classes)[0]) => void;
+  onSelect: (selectedClass: CharacterClass) => void;
+  onProficienciesChange: (proficiencies: string[]) => void;
+  selectedClassId?: string;
 }
 
-const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
-  const [selectedClass, setSelectedClass] = useState<
-    (typeof classes)[0] | null
-  >(null);
+const ClassSelection: React.FC<ClassSelectionProps> = ({
+  onSelect,
+  onProficienciesChange,
+  selectedClassId,
+}) => {
+  const [selectedClass, setSelectedClass] = useState<CharacterClass | null>(
+    classes.find((c) => c.id === selectedClassId) || null
+  );
+  const [selectedProficiencies, setSelectedProficiencies] = useState<string[]>(
+    []
+  );
 
-  const handleClassSelect = (characterClass: (typeof classes)[0]) => {
-    setSelectedClass(characterClass);
-    if (onSelect) {
-      onSelect(characterClass);
+  // handleProficiencyToggle 수정
+  const handleProficiencyToggle = (skill: string) => {
+    if (!selectedClass) return;
+
+    const maxSkills = selectedClass.proficiencies.skills;
+    let newSelection = [...selectedProficiencies];
+
+    if (newSelection.includes(skill)) {
+      newSelection = newSelection.filter((s) => s !== skill);
+    } else if (newSelection.length < maxSkills) {
+      newSelection = [...newSelection, skill];
+    } else {
+      return; // 최대 선택 가능 개수를 초과하면 리턴
     }
+
+    setSelectedProficiencies(newSelection);
+    onProficienciesChange(newSelection);
   };
+
+  // 클래스 변경 시 프로피션시 초기화
+  const handleClassSelect = (characterClass: CharacterClass) => {
+    setSelectedClass(characterClass);
+    setSelectedProficiencies([]); // Reset proficiencies
+    onSelect(characterClass);
+    onProficienciesChange([]); // Reset proficiencies in parent component
+  };
+
+  // 컴포넌트 마운트 시 또는 selectedClassId 변경 시 초기화
+  useEffect(() => {
+    if (selectedClassId) {
+      const newSelectedClass = classes.find((c) => c.id === selectedClassId);
+      if (newSelectedClass) {
+        setSelectedClass(newSelectedClass);
+      }
+    }
+  }, [selectedClassId]);
 
   return (
     <div className="grid grid-cols-2 gap-6">
+      {/* Left column - Class selection */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Choose Your Class</h3>
         <ScrollArea className="h-[500px] pr-4">
@@ -376,6 +437,7 @@ const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
         </ScrollArea>
       </div>
 
+      {/* Right column - Class details and proficiency selection */}
       <div>
         {selectedClass ? (
           <Card>
@@ -418,7 +480,8 @@ const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
 
               <div>
                 <h4 className="font-medium mb-2">Proficiencies</h4>
-                <div className="space-y-2">
+                <div className="space-y-4">
+                  {/* Armor Proficiencies */}
                   {selectedClass.proficiencies.armor.length > 0 && (
                     <div>
                       <span className="text-sm font-medium">Armor: </span>
@@ -427,6 +490,8 @@ const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
                       </span>
                     </div>
                   )}
+
+                  {/* Weapon Proficiencies */}
                   {selectedClass.proficiencies.weapons.length > 0 && (
                     <div>
                       <span className="text-sm font-medium">Weapons: </span>
@@ -435,12 +500,43 @@ const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
                       </span>
                     </div>
                   )}
+
+                  {/* Skill Proficiencies */}
                   <div>
-                    <span className="text-sm font-medium">Skills: </span>
-                    <span className="text-sm text-muted-foreground">
-                      Choose {selectedClass.proficiencies.skills} from:{" "}
-                      {selectedClass.proficiencies.skillChoices.join(", ")}
-                    </span>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Skills </span>
+                      <span className="text-sm text-muted-foreground">
+                        {selectedProficiencies.length}/
+                        {selectedClass.proficiencies.skills} selected
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {selectedClass.proficiencies.skillChoices.map((skill) => (
+                        <div
+                          key={skill}
+                          className="flex items-center space-x-2"
+                        >
+                          <Checkbox
+                            id={skill}
+                            checked={selectedProficiencies.includes(skill)}
+                            onCheckedChange={() =>
+                              handleProficiencyToggle(skill)
+                            }
+                            disabled={
+                              !selectedProficiencies.includes(skill) &&
+                              selectedProficiencies.length >=
+                                selectedClass.proficiencies.skills
+                            }
+                          />
+                          <label
+                            htmlFor={skill}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                          >
+                            {skill}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -449,7 +545,7 @@ const ClassSelection: React.FC<ClassSelectionProps> = ({ onSelect }) => {
         ) : (
           <Card className="flex items-center justify-center h-full">
             <CardContent className="text-center text-muted-foreground p-6">
-              <Shield className="w-12 h-12 mx-auto mb-4" />
+              <Eye className="w-12 h-12 mx-auto mb-4" />
               <p>Select a class to view its details</p>
             </CardContent>
           </Card>

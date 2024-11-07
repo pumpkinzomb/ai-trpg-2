@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -19,68 +19,87 @@ import {
   Eye,
 } from "lucide-react";
 
+const abilityStats = [
+  {
+    name: "Strength",
+    value: 0,
+    modifier: 0,
+    rolls: [],
+    icon: <Sword className="w-5 h-5" />,
+    description: "자연스러운 운동 능력, 신체적 힘, 물리적인 강도",
+  },
+  {
+    name: "Dexterity",
+    value: 0,
+    modifier: 0,
+    rolls: [],
+    icon: <Hand className="w-5 h-5" />,
+    description: "민첩성, 반사 신경, 균형 감각, 손-눈 협응력",
+  },
+  {
+    name: "Constitution",
+    value: 0,
+    modifier: 0,
+    rolls: [],
+    icon: <Heart className="w-5 h-5" />,
+    description: "건강, 지구력, 생명력",
+  },
+  {
+    name: "Intelligence",
+    value: 0,
+    modifier: 0,
+    rolls: [],
+    icon: <Brain className="w-5 h-5" />,
+    description: "정신적 예리함, 기억력, 분석 능력",
+  },
+  {
+    name: "Wisdom",
+    value: 0,
+    modifier: 0,
+    rolls: [],
+    icon: <Eye className="w-5 h-5" />,
+    description: "인지력, 직관력, 의지력",
+  },
+  {
+    name: "Charisma",
+    value: 0,
+    modifier: 0,
+    rolls: [],
+    icon: <Smile className="w-5 h-5" />,
+    description: "개성의 힘, 설득력, 리더십",
+  },
+];
+
+function getStatAffects(statName: string): string {
+  const affects: Record<string, string> = {
+    Strength: "근접 공격, 근력 판정, 운동, 짐 운반량",
+    Dexterity: "원거리 공격, 민첩성 판정, 곡예, 은신, 민첩 내성, 기본 방어도",
+    Constitution: "생명력, 집중 판정, 체력 내성, 피로도 저항",
+    Intelligence: "비전, 역사, 조사, 자연, 종교 판정, 주문 시전(마법사)",
+    Wisdom: "감지, 통찰, 의학, 생존, 동물 조련, 주문 시전(클레릭/드루이드)",
+    Charisma: "기만, 협박, 공연, 설득, 주문 시전(바드/소서러/워락)",
+  };
+
+  return affects[statName] || "";
+}
+
 interface Stat {
   name: string;
   value: number;
-  rolls?: number[];
   modifier: number;
+  rolls?: number[];
   icon: React.ReactNode;
   description: string;
 }
 
-const StatRolling: React.FC<{
-  onComplete?: (stats: Record<string, number>) => void;
-}> = ({ onComplete }) => {
-  const [stats, setStats] = useState<Stat[]>([
-    {
-      name: "Strength",
-      value: 0,
-      modifier: 0,
-      rolls: [],
-      icon: <Sword className="w-5 h-5" />,
-      description: "Natural athleticism, bodily power, and physical force",
-    },
-    {
-      name: "Dexterity",
-      value: 0,
-      modifier: 0,
-      rolls: [],
-      icon: <Hand className="w-5 h-5" />,
-      description: "Agility, reflexes, balance, and hand-eye coordination",
-    },
-    {
-      name: "Constitution",
-      value: 0,
-      modifier: 0,
-      rolls: [],
-      icon: <Heart className="w-5 h-5" />,
-      description: "Health, stamina, and vital force",
-    },
-    {
-      name: "Intelligence",
-      value: 0,
-      modifier: 0,
-      rolls: [],
-      icon: <Brain className="w-5 h-5" />,
-      description: "Mental acuity, recall ability, and analytical skill",
-    },
-    {
-      name: "Wisdom",
-      value: 0,
-      modifier: 0,
-      rolls: [],
-      icon: <Eye className="w-5 h-5" />,
-      description: "Awareness, intuition, and force of will",
-    },
-    {
-      name: "Charisma",
-      value: 0,
-      modifier: 0,
-      rolls: [],
-      icon: <Smile className="w-5 h-5" />,
-      description: "Force of personality, persuasiveness, and leadership",
-    },
-  ]);
+interface StatRollingProps {
+  onComplete?: (
+    stats: Record<string, { value: number; modifier: number }>
+  ) => void;
+}
+
+const StatRolling: React.FC<StatRollingProps> = ({ onComplete }) => {
+  const [stats, setStats] = useState<Stat[]>(abilityStats);
   const [rolling, setRolling] = useState(false);
   const [activeStatIndex, setActiveStatIndex] = useState<number | null>(null);
   const [availablePoints, setAvailablePoints] = useState<number[]>([]);
@@ -139,6 +158,20 @@ const StatRolling: React.FC<{
     setStats(newStats);
     setAvailablePoints(newPoints);
     setActiveStatIndex(null);
+
+    // 모든 스탯이 할당되었는지 확인하고 onComplete 호출
+    const isComplete = newStats.every((stat) => stat.value > 0);
+    if (isComplete && onComplete) {
+      const formattedStats = newStats.reduce((acc, stat) => {
+        acc[stat.name.toLowerCase()] = {
+          value: stat.value,
+          modifier: stat.modifier,
+        };
+        return acc;
+      }, {} as Record<string, { value: number; modifier: number }>);
+
+      onComplete(formattedStats);
+    }
   };
 
   const resetStats = () => {
@@ -147,9 +180,12 @@ const StatRolling: React.FC<{
     );
     setAvailablePoints([]);
     setActiveStatIndex(null);
-  };
 
-  const isComplete = stats.every((stat) => stat.value > 0);
+    // Reset를 했을 때 onComplete 호출하여 상위 컴포넌트 상태도 초기화
+    if (onComplete) {
+      onComplete({});
+    }
+  };
 
   return (
     <div className="grid grid-cols-2 gap-6">
@@ -175,7 +211,11 @@ const StatRolling: React.FC<{
             <Button
               variant="outline"
               onClick={resetStats}
-              disabled={rolling || availablePoints.length === 0}
+              disabled={
+                rolling ||
+                (availablePoints.length === 0 &&
+                  !stats.some((s) => s.value > 0))
+              }
             >
               <RotateCcw className="w-4 h-4 mr-2" />
               Reset
@@ -294,19 +334,5 @@ const StatRolling: React.FC<{
     </div>
   );
 };
-
-// 각 능력치가 영향을 미치는 기술들을 반환하는 헬퍼 함수
-function getStatAffects(statName: string): string {
-  const affects: Record<string, string> = {
-    Strength: "Athletics, melee attacks, carrying capacity",
-    Dexterity: "Acrobatics, Stealth, ranged attacks, initiative",
-    Constitution: "Hit points, concentration saves, endurance",
-    Intelligence: "Arcana, History, Investigation, Nature, Religion",
-    Wisdom: "Animal Handling, Insight, Medicine, Perception, Survival",
-    Charisma: "Deception, Intimidation, Performance, Persuasion",
-  };
-
-  return affects[statName] || "";
-}
 
 export default StatRolling;

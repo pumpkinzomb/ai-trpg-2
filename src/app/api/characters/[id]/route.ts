@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/dbConnect";
-import { Character } from "@/models/game-models";
+import { Character } from "@/app/models";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Types } from "mongoose";
