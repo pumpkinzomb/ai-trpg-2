@@ -55,7 +55,7 @@ export function SignInForm() {
       }
 
       router.refresh();
-      router.push("/dashboard");
+      router.push("/worlds");
       toast({
         title: "로그인 성공",
         description: "환영합니다!",

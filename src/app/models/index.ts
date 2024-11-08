@@ -98,10 +98,10 @@ const characterSchema = new Schema(
     resource: {
       current: { type: Number, required: true },
       max: { type: Number, required: true },
-      name: { type: String, required: true }, // "Mana", "Ki", "Rage" 등 클래스별 이름만 다르게
+      name: { type: String, required: true },
     },
     profileImage: {
-      type: String, // base64 이미지 데이터를 저장
+      type: String,
       required: true,
     },
   },
@@ -205,7 +205,15 @@ const itemSchema = new Schema(
       ],
     },
     requiredLevel: { type: Number, required: true },
+    description: { type: String, default: "" },
     value: { type: Number, required: true },
+    ownerId: { type: Schema.Types.ObjectId, ref: "Character", default: null },
+    previousOwnerId: {
+      type: Schema.Types.ObjectId,
+      ref: "Character",
+      default: null,
+    },
+    isBaseItem: { type: Boolean, default: false },
   },
   {
     timestamps: true,
@@ -332,6 +340,10 @@ interface IItem extends Document {
   };
   requiredLevel: number;
   value: number;
+  ownerId: string | null;
+  previousOwnerId: string | null;
+  isBaseItem: boolean;
+  description: string;
 }
 
 // Models

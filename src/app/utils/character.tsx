@@ -309,3 +309,30 @@ export function getInitialResource(characterClass: string): {
     name: config.name,
   };
 }
+
+export const checkArmorClassRestriction = (
+  characterClass: string,
+  armorType: string
+): boolean => {
+  // 클래스별 착용 가능한 방어구 타입 정의
+  const armorRestrictions: { [key: string]: string[] } = {
+    Barbarian: ["light-armor", "medium-armor"],
+    Bard: ["light-armor", "medium-armor"],
+    Cleric: ["light-armor", "medium-armor", "heavy-armor"],
+    Druid: ["light-armor", "medium-armor"],
+    Fighter: ["light-armor", "medium-armor", "heavy-armor"],
+    Monk: ["light-armor"],
+    Paladin: ["light-armor", "medium-armor", "heavy-armor"],
+    Ranger: ["light-armor", "medium-armor"],
+    Rogue: ["light-armor"],
+    Sorcerer: ["light-armor"],
+    Warlock: ["light-armor"],
+    Wizard: ["light-armor"],
+  };
+
+  // 해당 클래스가 착용 가능한 방어구 타입 목록 가져오기
+  const allowedArmorTypes = armorRestrictions[characterClass] || [];
+
+  // 착용하려는 방어구 타입이 허용된 목록에 있는지 확인
+  return allowedArmorTypes.includes(armorType);
+};

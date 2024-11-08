@@ -11,7 +11,9 @@ import CharacterArenaStats from "./CharacterArenaStats";
 import CharacterInventory from "./CharacterInventory";
 import { redirect } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { Item, ItemEffect, Character } from "@/app/types";
+import { Item, Character } from "@/app/types";
+import { checkArmorClassRestriction } from "@/app/utils/character";
+import LoadingSpinner from "@/components/loading";
 
 interface CharacterClientProps {
   id: string;
@@ -31,50 +33,12 @@ export function CharacterClient({ id }: CharacterClientProps) {
     data: character,
     error,
     mutate: refreshCharacter,
+    isLoading: isInitialLoading,
   } = useSWR<Character>(`/api/characters/${id}`, fetcher, {
     revalidateOnFocus: false,
     refreshInterval: 0,
     shouldRetryOnError: false,
   });
-
-  // 장비 효과를 반영한 최종 스탯 계산
-  const calculateFinalStats = (
-    baseStats: Character["stats"],
-    equipment: Character["equipment"]
-  ) => {
-    const finalStats = { ...baseStats };
-    const allItems = [
-      equipment.weapon,
-      equipment.armor,
-      equipment.shield,
-      ...equipment.accessories,
-    ].filter(Boolean);
-
-    allItems.forEach((item) => {
-      item?.stats.effects.forEach((effect: ItemEffect) => {
-        if (effect.type.toLowerCase().includes("strength")) {
-          finalStats.strength += parseInt(effect.value) || 0;
-        }
-        if (effect.type.toLowerCase().includes("dexterity")) {
-          finalStats.dexterity += parseInt(effect.value) || 0;
-        }
-        if (effect.type.toLowerCase().includes("constitution")) {
-          finalStats.constitution += parseInt(effect.value) || 0;
-        }
-        if (effect.type.toLowerCase().includes("intelligence")) {
-          finalStats.intelligence += parseInt(effect.value) || 0;
-        }
-        if (effect.type.toLowerCase().includes("wisdom")) {
-          finalStats.wisdom += parseInt(effect.value) || 0;
-        }
-        if (effect.type.toLowerCase().includes("charisma")) {
-          finalStats.charisma += parseInt(effect.value) || 0;
-        }
-      });
-    });
-
-    return finalStats;
-  };
 
   const handleEquipItem = async (item: Item) => {
     if (!character) return;
@@ -94,7 +58,23 @@ export function CharacterClient({ id }: CharacterClientProps) {
           }
           updatedEquipment.weapon = item;
           break;
-        case "armor":
+        case "light-armor":
+        case "medium-armor":
+        case "heavy-armor":
+          // 캐릭터 클래스에 따른 방어구 착용 제한 체크
+          const canEquipArmor = checkArmorClassRestriction(
+            character.class,
+            item.type
+          );
+          if (!canEquipArmor) {
+            toast({
+              variant: "destructive",
+              title: "장비 실패",
+              description: `${character.class} 클래스는 ${item.type}을(를) 착용할 수 없습니다.`,
+            });
+            return;
+          }
+
           slot = "armor";
           if (updatedEquipment.armor) {
             updatedInventory.push(updatedEquipment.armor);
@@ -169,7 +149,6 @@ export function CharacterClient({ id }: CharacterClientProps) {
       // type이 "accessory"인 경우의 처리
       if (slot === "accessory" && typeof index === "number") {
         if (index >= 0 && index < updatedEquipment.accessories.length) {
-          // 액세서리 배열의 깊은 복사
           updatedEquipment.accessories = [...updatedEquipment.accessories];
           unequippedItem = { ...updatedEquipment.accessories[index] };
           updatedEquipment.accessories.splice(index, 1);
@@ -186,10 +165,21 @@ export function CharacterClient({ id }: CharacterClientProps) {
             updatedEquipment.weapon = null;
             break;
           case "armor":
-            unequippedItem = updatedEquipment.armor
-              ? { ...updatedEquipment.armor }
-              : null;
-            updatedEquipment.armor = null;
+            // armor 슬롯에 장착된 아이템이 있는 경우
+            if (updatedEquipment.armor) {
+              const armorType = updatedEquipment.armor.type;
+              // armor 타입 검증
+              if (
+                armorType === "light-armor" ||
+                armorType === "medium-armor" ||
+                armorType === "heavy-armor"
+              ) {
+                unequippedItem = { ...updatedEquipment.armor };
+                updatedEquipment.armor = null;
+              } else {
+                throw new Error("잘못된 방어구 타입입니다");
+              }
+            }
             break;
           case "shield":
             unequippedItem = updatedEquipment.shield
@@ -220,10 +210,21 @@ export function CharacterClient({ id }: CharacterClientProps) {
       if (!response.ok) throw new Error("Failed to unequip item");
 
       await refreshCharacter();
+
+      // 방어구 타입에 따른 메시지 생성
+      let itemTypeDisplay = "";
+      if (unequippedItem?.type === "light-armor") itemTypeDisplay = "경장 갑옷";
+      else if (unequippedItem?.type === "medium-armor")
+        itemTypeDisplay = "중장 갑옷";
+      else if (unequippedItem?.type === "heavy-armor")
+        itemTypeDisplay = "중갑 갑옷";
+
       toast({
         title: "장비 해제 완료",
         description: unequippedItem
-          ? `${unequippedItem.name}을(를) 해제했습니다.`
+          ? `${unequippedItem.name}${
+              itemTypeDisplay ? ` (${itemTypeDisplay})` : ""
+            }을(를) 해제했습니다.`
           : "장비를 해제했습니다.",
       });
     } catch (error) {
@@ -245,14 +246,25 @@ export function CharacterClient({ id }: CharacterClientProps) {
     redirect("/characters");
   }
 
+  if (isInitialLoading) {
+    return (
+      <div className="container mx-auto py-6 px-4 min-h-screen">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
   if (!character) {
     return null;
   }
 
-  const finalStats = calculateFinalStats(character.stats, character.equipment);
-
   return (
-    <div className="container mx-auto py-6 px-4">
+    <div className="container mx-auto py-6 px-4 relative">
+      {isLoading && (
+        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <LoadingSpinner />
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-3">
           <CharacterHeader character={character} />

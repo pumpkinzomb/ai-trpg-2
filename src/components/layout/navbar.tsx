@@ -26,11 +26,11 @@ export function Navbar() {
               <Gamepad2 className="h-6 w-6 text-white" />
             </div>
             <span className="inline-block font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-600 to-blue-600">
-              AI TRPG
+              ZOMB's TRPG
             </span>
           </Link>
           <nav className="hidden md:flex gap-6">
-            <Link href="/about">
+            <Link href="/worlds">
               <Button
                 variant="ghost"
                 className="text-sm font-medium hover:text-primary"

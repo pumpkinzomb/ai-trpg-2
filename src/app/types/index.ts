@@ -116,12 +116,19 @@ export interface Item {
     | "consumable";
   rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
   stats: {
-    damage?: string; // "1d8+1" 같은 형식으로
+    damage?: string;
     defense?: number;
-    effects: ItemEffect[];
+    effects: {
+      type: string;
+      value: string;
+    }[];
   };
   requiredLevel: number;
   value: number;
+  ownerId?: string | null;
+  previousOwnerId?: string | null;
+  isBaseItem?: boolean;
+  description?: string;
 }
 
 export interface ItemEffect {
@@ -136,3 +143,63 @@ export type RaceType =
   | "halfling"
   | "dragonborn"
   | "tiefling";
+
+export type ClassType =
+  | "Barbarian"
+  | "Bard"
+  | "Cleric"
+  | "Druid"
+  | "Fighter"
+  | "Monk"
+  | "Paladin"
+  | "Ranger"
+  | "Rogue"
+  | "Sorcerer"
+  | "Warlock"
+  | "Wizard";
+
+export type ArmorType =
+  | "light-armor"
+  | "medium-armor"
+  | "heavy-armor"
+  | "shield";
+
+export type WeaponType =
+  | "simple-melee"
+  | "simple-ranged"
+  | "martial-melee"
+  | "martial-ranged"
+  | "finesse"
+  | "magical";
+
+export type ItemType = "weapon" | ArmorType | "accessory" | "consumable";
+
+export type ItemRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
+
+export type StatType =
+  | "strength"
+  | "dexterity"
+  | "constitution"
+  | "intelligence"
+  | "wisdom"
+  | "charisma";
+
+export interface ItemStats {
+  damage?: string;
+  defense?: number;
+  effects: ItemEffect[];
+}
+
+export type GenerationItem = Omit<Item, "_id">;
+
+export interface MarketItem extends Item {
+  canEquip: boolean;
+  restrictionReason?: string;
+}
+
+export type MarketType = "normal" | "secret" | "black";
+
+export interface ValidatedGenerationItem extends GenerationItem {
+  canEquip: boolean;
+  restrictionReason?: string;
+}
