@@ -316,6 +316,26 @@ const dungeonSchema = new Schema(
       required: true,
       default: true,
     },
+    temporaryInventory: {
+      type: [
+        {
+          itemId: {
+            type: Schema.Types.ObjectId,
+            ref: "Item",
+            required: true,
+          },
+          logId: {
+            type: Schema.Types.ObjectId,
+            required: true,
+          },
+          timestamp: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      default: [], // 기본값 설정
+    },
     logs: [
       {
         type: {
@@ -377,6 +397,7 @@ interface IDungeonState extends Document {
   logs: DungeonLog[];
   createdAt: Date;
   updatedAt: Date;
+  temporaryInventory: mongoose.Types.ObjectId[];
 }
 
 interface ISpell extends Document {

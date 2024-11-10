@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import OpenAI from "openai";
 import { Character, Dungeon, Item } from "@/app/models";
-import { DungeonLog, GenerationDungeonLog, GenerationItem } from "@/app/types";
+import { GenerationDungeonLog, GenerationItem } from "@/app/types";
 import { generateImage } from "@/app/utils/aiDrawing";
 import { Types } from "mongoose";
 
@@ -167,7 +167,7 @@ export async function POST(req: NextRequest) {
               gold: result.rewards.gold,
               xp: result.rewards.xp,
               items: result.rewards.items,
-              goldLooted: result.rewards.goldLooted || false,
+              goldLooted: false,
             }
           : undefined,
       },

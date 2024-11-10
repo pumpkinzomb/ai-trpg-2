@@ -34,8 +34,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // temporaryInventory가 없으면 빈 배열로 초기화
+    const temporaryInventory = dungeon.temporaryInventory || [];
+
     // 이미 획득한 아이템인지 확인
-    const alreadyLooted = dungeon.temporaryInventory.some(
+    const alreadyLooted = temporaryInventory.some(
       (loot: TemporaryLoot) => loot.itemId === itemId
     );
 
@@ -46,33 +49,62 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // temporaryInventory에 아이템 추가
-    const updatedDungeon = await Dungeon.findByIdAndUpdate(
-      dungeonId,
-      {
-        $push: {
-          temporaryInventory: {
-            itemId,
-            logId,
-            timestamp: new Date(),
-          },
+    const itemObjectId = new mongoose.Types.ObjectId(itemId);
+    const logObjectId = new mongoose.Types.ObjectId(logId);
+
+    // 새로운 임시 인벤토리 아이템
+    const newTemporaryItem = {
+      itemId: itemObjectId,
+      logId: logObjectId,
+      timestamp: new Date(),
+    };
+
+    console.log("New temporary item to be added:", newTemporaryItem);
+
+    // 업데이트 쿼리 수정
+    const updateQuery = {
+      $push: {
+        temporaryInventory: {
+          itemId: itemObjectId,
+          logId: logObjectId,
+          timestamp: new Date(),
         },
       },
-      { new: true, session: mongoSession }
+    };
+
+    // 업데이트 수행
+    const updatedDungeon = await Dungeon.findByIdAndUpdate(
+      dungeonId,
+      updateQuery,
+      {
+        new: true,
+        session: mongoSession,
+        runValidators: true,
+        select: "+temporaryInventory", // select 옵션 추가
+      }
     ).populate("characterId");
+
+    if (!updatedDungeon) {
+      throw new Error("Failed to update dungeon");
+    }
 
     if (updatedDungeon.characterId) {
       await Character.findByIdAndUpdate(
         updatedDungeon.characterId._id,
         {
-          $push: { inventory: itemId },
+          $push: { inventory: itemObjectId },
         },
-        { new: true, session: mongoSession }
+        { new: true, session: mongoSession, runValidators: true }
       );
     }
 
     await mongoSession.commitTransaction();
-    return NextResponse.json(updatedDungeon);
+
+    const finalDungeon = await Dungeon.findById(dungeonId)
+      .select("+temporaryInventory")
+      .populate("characterId");
+
+    return NextResponse.json(finalDungeon);
   } catch (error) {
     await mongoSession.abortTransaction();
     console.error("Dungeon loot error:", error);

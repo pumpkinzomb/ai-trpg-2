@@ -275,3 +275,17 @@ export interface DungeonState {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface EscapePenalties {
+  lostGold: number;
+  lostItems: Array<{
+    itemId: string;
+    logId: string;
+    name?: string;
+  }>;
+  savedItems: Array<{
+    itemId: string;
+    logId: string;
+    name?: string;
+  }>;
+}

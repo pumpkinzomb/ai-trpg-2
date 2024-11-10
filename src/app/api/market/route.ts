@@ -16,7 +16,7 @@ async function generateFantasyItems(playerLevel: number, count: number) {
   Create ${count} unique fantasy RPG items as JSON array. Each item must strictly follow this TypeScript interface and D&D 5e rules:
 
   interface Item {
-    name: string;
+    name: string;         // Item name in Korean
     type: "weapon" | "light-armor" | "medium-armor" | "heavy-armor" | "shield" | "accessory";
     rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
     stats: {
@@ -28,13 +28,13 @@ async function generateFantasyItems(playerLevel: number, count: number) {
       }[];
     };
     requiredLevel: number;
-    description: string;
+    description: string;       // Item description in Korean
     value: number;       // Base gold value
   }
 
   Requirements:
   - Level requirement should be around ${playerLevel}
-  - Value should be balanced for level (100-500 × level × rarity multiplier)
+  - Value should be balanced for level (100-500 x level x rarity multiplier)
   - Rarity multipliers: common(1x), uncommon(2x), rare(3x), epic(5x), legendary(10x)
   
   Equipment balance:
@@ -252,7 +252,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { characterId, itemId } = body;
+    const { characterId, itemId, quantity = 1 } = body; // quantity 파라미터 추가
 
     const [character, item] = await Promise.all([
       Character.findById(characterId),
@@ -266,29 +266,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (character.gold < item.value) {
+    const totalCost = item.value * quantity;
+    if (character.gold < totalCost) {
       return NextResponse.json({ error: "Not enough gold" }, { status: 400 });
     }
 
-    // 캐릭터 레벨 체크
     if (character.level < item.requiredLevel) {
       return NextResponse.json({ error: "Level too low" }, { status: 400 });
     }
 
-    // 기본 아이템이 아닌 경우만 소유자 정보 업데이트
-    if (!item.isBaseItem) {
-      item.ownerId = character._id;
-      await item.save();
+    // quantity만큼 아이템 생성 및 추가
+    const newItems = [];
+    for (let i = 0; i < quantity; i++) {
+      const newItem = new Item({
+        ...item.toObject(),
+        _id: new Types.ObjectId(), // 새로운 ID 생성
+        isBaseItem: false,
+        ownerId: character._id,
+      });
+      await newItem.save();
+      newItems.push(newItem._id);
     }
 
     // 캐릭터 골드 차감 및 인벤토리 업데이트
-    character.gold -= item.value;
-    character.inventory.push(item._id);
+    character.gold -= totalCost;
+    character.inventory.push(...newItems);
     await character.save();
 
     return NextResponse.json({
       success: true,
-      item,
+      items: newItems,
       remainingGold: character.gold,
     });
   } catch (error) {
@@ -308,62 +315,90 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { characterId, itemId } = body;
+    const { characterId, inventoryIds } = body; // itemId 대신 inventoryIds 배열 받기
 
-    const [character, item] = await Promise.all([
-      Character.findById(characterId).populate(
-        "equipment.weapon equipment.armor equipment.shield equipment.accessories"
-      ),
-      Item.findById(itemId),
-    ]);
+    const character = await Character.findById(characterId).populate(
+      "equipment.weapon equipment.armor equipment.shield equipment.accessories"
+    );
 
-    if (!character || !item) {
+    if (!character) {
       return NextResponse.json(
-        { error: "Character or Item not found" },
+        { error: "Character not found" },
         { status: 404 }
       );
     }
 
-    if (!character.inventory.includes(item._id)) {
+    // 모든 아이템 조회
+    const items = await Item.find({
+      _id: { $in: inventoryIds },
+    });
+
+    if (items.length !== inventoryIds.length) {
       return NextResponse.json(
-        { error: "Item not in inventory" },
+        { error: "Some items not found" },
+        { status: 404 }
+      );
+    }
+
+    // 모든 아이템이 인벤토리에 있는지 확인
+    const allItemsInInventory = inventoryIds.every((id: string) =>
+      character.inventory.some(
+        (invItem: Types.ObjectId) => invItem.toString() === id
+      )
+    );
+
+    if (!allItemsInInventory) {
+      return NextResponse.json(
+        { error: "Some items not in inventory" },
         { status: 400 }
       );
     }
 
-    // equipment 객체의 모든 값을 배열로 변환하여 체크
-    const isEquipped = [
-      character.equipment.weapon,
-      character.equipment.armor,
-      character.equipment.shield,
-      ...(character.equipment.accessories || []),
-    ].some((equip) => equip && equip._id?.toString() === item._id.toString());
+    // 장착된 아이템이 있는지 확인
+    const equippedItemIds: Types.ObjectId[] = [
+      character.equipment.weapon?._id,
+      character.equipment.armor?._id,
+      character.equipment.shield?._id,
+      ...(character.equipment.accessories?.map(
+        (acc: { _id: Types.ObjectId }) => acc._id
+      ) || []),
+    ].filter((id): id is Types.ObjectId => id != null);
 
-    if (isEquipped) {
+    const hasEquippedItems = inventoryIds.some((id: string) =>
+      equippedItemIds.some((equippedId) => equippedId.toString() === id)
+    );
+
+    if (hasEquippedItems) {
       return NextResponse.json(
         { error: "Cannot sell equipped items" },
         { status: 400 }
       );
     }
 
-    const sellPrice = Math.floor(item.value * 0.6);
-
-    if (!item.isBaseItem) {
-      item.previousOwnerId = item.ownerId;
-      item.ownerId = null;
-      await item.save();
-    }
-
-    // inventory는 ObjectId[] 타입임을 명시
-    character.inventory = character.inventory.filter(
-      (invItem: Types.ObjectId) => invItem.toString() !== itemId
+    // 판매 가격 계산 및 처리
+    const totalSellPrice = items.reduce(
+      (sum, item) => sum + Math.floor(item.value * 0.6),
+      0
     );
-    character.gold += sellPrice;
+
+    // 아이템 소유권 업데이트
+    await Item.updateMany(
+      { _id: { $in: inventoryIds } },
+      {
+        $set: { previousOwnerId: character._id, ownerId: null },
+      }
+    );
+
+    // 캐릭터 인벤토리 및 골드 업데이트
+    character.inventory = character.inventory.filter(
+      (invItem: IItem) => !inventoryIds.includes(invItem.toString())
+    );
+    character.gold += totalSellPrice;
     await character.save();
 
     return NextResponse.json({
       success: true,
-      soldPrice: sellPrice,
+      soldPrice: totalSellPrice,
       newGold: character.gold,
     });
   } catch (error) {

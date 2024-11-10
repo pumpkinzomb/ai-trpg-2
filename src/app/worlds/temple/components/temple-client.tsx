@@ -37,6 +37,9 @@ interface TempleClientProps {
 export function TempleClient({ templeImage }: TempleClientProps) {
   const { toast } = useToast();
   const [characters, setCharacters] = useState<Character[]>([]);
+  const [charactersInDungeon, setCharactersInDungeon] = useState<Set<string>>(
+    new Set()
+  );
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(
     null
   );
@@ -52,6 +55,37 @@ export function TempleClient({ templeImage }: TempleClientProps) {
     fetchCharacters();
   }, []);
 
+  const checkDungeonStatus = async (characters: Character[]) => {
+    try {
+      const dungeonStatuses = await Promise.all(
+        characters.map(async (character) => {
+          const response = await fetch(
+            `/api/dungeon/active?characterId=${character._id}`
+          );
+          const data = await response.json();
+          return {
+            characterId: character._id.toString(),
+            inDungeon: !!data.dungeon,
+          };
+        })
+      );
+
+      const inDungeonIds = new Set(
+        dungeonStatuses
+          .filter((status) => status.inDungeon)
+          .map((status) => status.characterId)
+      );
+      setCharactersInDungeon(inDungeonIds);
+    } catch (error) {
+      console.error("Failed to check dungeon status:", error);
+      toast({
+        variant: "destructive",
+        title: "오류",
+        description: "캐릭터 상태 확인에 실패했습니다.",
+      });
+    }
+  };
+
   // 캐릭터의 치료 필요 여부를 확인하는 함수
   const needsHealing = (character: Character) => {
     return (
@@ -63,11 +97,18 @@ export function TempleClient({ templeImage }: TempleClientProps) {
   // 치료 가능 여부를 확인하는 함수 (골드 포함)
   const canBeHealed = (character: Character) => {
     const healingCost = calculateHealingCost(character.level);
-    return needsHealing(character) && character.gold >= healingCost;
+    return (
+      needsHealing(character) &&
+      character.gold >= healingCost &&
+      !charactersInDungeon.has(character._id.toString())
+    );
   };
 
   // 치료 버튼의 상태 메시지를 반환하는 함수
   const getHealingButtonMessage = (character: Character) => {
+    if (charactersInDungeon.has(character._id.toString())) {
+      return "던전 탐험 중인 캐릭터는 이용할 수 없습니다";
+    }
     if (!needsHealing(character)) {
       return "치료가 필요하지 않습니다";
     }
@@ -83,6 +124,7 @@ export function TempleClient({ templeImage }: TempleClientProps) {
       const response = await fetch("/api/characters");
       const data = await response.json();
       setCharacters(data.characters);
+      await checkDungeonStatus(data.characters);
     } catch (error) {
       toast({
         variant: "destructive",
@@ -94,6 +136,15 @@ export function TempleClient({ templeImage }: TempleClientProps) {
 
   const handleHeal = async () => {
     if (!selectedCharacter) return;
+
+    if (charactersInDungeon.has(selectedCharacter._id.toString())) {
+      toast({
+        variant: "destructive",
+        title: "치료 불가",
+        description: "던전 탐험 중인 캐릭터는 신전을 이용할 수 없습니다.",
+      });
+      return;
+    }
 
     // 치료가 필요없는 경우 처리
     if (!needsHealing(selectedCharacter)) {
@@ -209,16 +260,40 @@ export function TempleClient({ templeImage }: TempleClientProps) {
                       <SelectValue placeholder="치료할 캐릭터를 선택하세요" />
                     </SelectTrigger>
                     <SelectContent>
-                      {characters.map((character) => (
-                        <SelectItem key={character._id} value={character._id}>
-                          {character.name} (Lv.{character.level})
-                        </SelectItem>
-                      ))}
+                      {characters.map((character) => {
+                        const inDungeon = charactersInDungeon.has(
+                          character._id.toString()
+                        );
+                        return (
+                          <SelectItem
+                            key={character._id}
+                            value={character._id}
+                            disabled={inDungeon}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span>
+                                {character.name} (Lv.{character.level})
+                              </span>
+                              {inDungeon && (
+                                <span className="text-xs text-red-500">
+                                  (던전 탐험 중)
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
 
                 {/* 선택된 캐릭터 정보 */}
+                {selectedCharacter &&
+                  charactersInDungeon.has(selectedCharacter._id.toString()) && (
+                    <div className="mt-2 text-sm text-red-500">
+                      던전 탐험 중인 캐릭터는 신전을 이용할 수 없습니다.
+                    </div>
+                  )}
                 {selectedCharacter && (
                   <div className="space-y-4">
                     {/* HP 바 */}

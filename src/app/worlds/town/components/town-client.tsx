@@ -26,11 +26,12 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Character, Item } from "@/app/types";
 
 type MarketType = "normal" | "secret" | "black";
+
+type MarketTab = "buy" | "sell";
 
 interface MarketInfo {
   title: string;
@@ -77,17 +78,55 @@ export default function TownClient({
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [buyingCharacterId, setBuyingCharacterId] = useState<string>("");
   const [showPurchaseDialog, setShowPurchaseDialog] = useState(false);
+  const [activeTab, setActiveTab] = useState<MarketTab>("buy");
+  const [selectedCharacterForSell, setSelectedCharacterForSell] =
+    useState<string>("");
+  const [charactersInDungeon, setCharactersInDungeon] = useState<Set<string>>(
+    new Set()
+  );
 
   useEffect(() => {
     fetchCharacters();
     fetchMarket();
   }, []);
 
+  const checkDungeonStatus = async (characters: Character[]) => {
+    try {
+      const dungeonStatuses = await Promise.all(
+        characters.map(async (character) => {
+          const response = await fetch(
+            `/api/dungeon/active?characterId=${character._id}`
+          );
+          const data = await response.json();
+          return {
+            characterId: character._id.toString(),
+            inDungeon: !!data.dungeon,
+          };
+        })
+      );
+
+      const inDungeonIds = new Set(
+        dungeonStatuses
+          .filter((status) => status.inDungeon)
+          .map((status) => status.characterId)
+      );
+      setCharactersInDungeon(inDungeonIds);
+    } catch (error) {
+      console.error("Failed to check dungeon status:", error);
+      toast({
+        variant: "destructive",
+        title: "오류",
+        description: "캐릭터 상태 확인에 실패했습니다.",
+      });
+    }
+  };
+
   const fetchCharacters = async () => {
     try {
       const response = await fetch("/api/characters");
       const data = await response.json();
       setCharacters(data.characters);
+      await checkDungeonStatus(data.characters);
     } catch (error) {
       toast({
         variant: "destructive",
@@ -118,6 +157,14 @@ export default function TownClient({
   const handleBuyItem = async (item: Item, characterId: string) => {
     const character = characters.find((c) => c._id.toString() === characterId);
     if (!character) return;
+    if (charactersInDungeon.has(characterId)) {
+      toast({
+        variant: "destructive",
+        title: "구매 불가",
+        description: "던전에서 탐험 중인 캐릭터는 아이템을 구매할 수 없습니다.",
+      });
+      return;
+    }
 
     if (character.gold < item.value) {
       toast({
@@ -170,6 +217,59 @@ export default function TownClient({
     }
   };
 
+  const handleSellItems = async (
+    characterId: string,
+    inventoryIds: string[]
+  ) => {
+    if (!characterId || inventoryIds.length === 0) return;
+    if (charactersInDungeon.has(characterId)) {
+      toast({
+        variant: "destructive",
+        title: "판매 불가",
+        description: "던전에서 탐험 중인 캐릭터는 아이템을 판매할 수 없습니다.",
+      });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/market", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          characterId,
+          inventoryIds,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error);
+      }
+
+      const data = await response.json();
+
+      await fetchCharacters();
+
+      toast({
+        title: "판매 완료",
+        description: `${inventoryIds.length}개의 아이템을 ${data.soldPrice} Gold에 판매했습니다.`,
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "판매 실패",
+        description:
+          error instanceof Error
+            ? error.message
+            : "아이템 판매에 실패했습니다.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const getRarityColor = (rarity: string) => {
     switch (rarity) {
       case "legendary":
@@ -183,6 +283,25 @@ export default function TownClient({
       default:
         return "text-gray-500";
     }
+  };
+
+  const groupInventoryItems = (inventory: any[]) => {
+    const groups = inventory.reduce((acc, item) => {
+      const key = `${item.name}-${item.value}-${item.type}`;
+      if (!acc[key]) {
+        acc[key] = {
+          ...item,
+          count: 1,
+          inventoryIds: [item._id.toString()],
+        };
+      } else {
+        acc[key].count++;
+        acc[key].inventoryIds.push(item._id.toString());
+      }
+      return acc;
+    }, {});
+
+    return Object.values(groups);
   };
 
   const getEffectDescription = (effectType: string) => {
@@ -242,10 +361,241 @@ export default function TownClient({
     );
   };
 
-  console.log("items", items);
+  const renderPurchaseDialogContent = () => (
+    <SelectContent>
+      {characters.map((character) => {
+        const inDungeon = charactersInDungeon.has(character._id.toString());
+        return (
+          <SelectItem
+            key={character._id.toString()}
+            value={character._id.toString()}
+            disabled={inDungeon}
+          >
+            <div className="flex justify-between items-center w-full">
+              <span className="flex items-center gap-2">
+                {character.name} (Lv.{character.level})
+                {inDungeon && (
+                  <span className="text-xs text-red-500">(던전 탐험 중)</span>
+                )}
+              </span>
+              <span className="ml-2">{character.gold} Gold</span>
+            </div>
+          </SelectItem>
+        );
+      })}
+    </SelectContent>
+  );
+
+  const renderSellTab = () => {
+    const selectedCharacter = characters.find(
+      (c) => c._id.toString() === selectedCharacterForSell
+    );
+
+    const groupedItems = selectedCharacter
+      ? groupInventoryItems(selectedCharacter.inventory)
+      : [];
+
+    const renderSellTabCharacterSelect = () => (
+      <Card className="p-4">
+        <Select
+          value={selectedCharacterForSell}
+          onValueChange={setSelectedCharacterForSell}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="캐릭터를 선택하세요" />
+          </SelectTrigger>
+          <SelectContent>
+            {characters.map((character) => {
+              const inDungeon = charactersInDungeon.has(
+                character._id.toString()
+              );
+              return (
+                <SelectItem
+                  key={character._id.toString()}
+                  value={character._id.toString()}
+                  disabled={inDungeon}
+                >
+                  <div className="flex justify-between items-center w-full">
+                    <span className="flex items-center gap-2">
+                      {character.name} (Lv.{character.level})
+                      {inDungeon && (
+                        <span className="text-xs text-red-500">
+                          (던전 탐험 중)
+                        </span>
+                      )}
+                    </span>
+                    <span className="ml-2">{character.gold} Gold</span>
+                  </div>
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </Card>
+    );
+
+    return (
+      <div className="space-y-6">
+        {/* 캐릭터 선택 */}
+        {renderSellTabCharacterSelect()}
+
+        {/* 인벤토리 아이템 목록 */}
+        {selectedCharacter && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {groupedItems.map((item: any) => (
+              <Card
+                key={item.inventoryIds[0]}
+                className="p-4 hover:shadow-lg transition-shadow"
+              >
+                <div className="flex flex-col min-h-[200px]">
+                  {/* 상단 정보: 이름, 가격, 수량 */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3
+                        className={`font-semibold ${getRarityColor(
+                          item.rarity
+                        )}`}
+                      >
+                        {item.name}
+                      </h3>
+                      <span className="text-sm text-muted-foreground">
+                        보유: {item.count}개
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Coins className="h-4 w-4" />
+                      <span>{Math.floor(item.value * 0.6)} Gold/개</span>
+                    </div>
+                  </div>
+
+                  {/* 중단 정보: 아이템 세부사항 */}
+                  <div className="flex-grow space-y-3 mb-4">
+                    {/* 아이템 타입 */}
+                    <div className="flex items-center gap-2">
+                      {item.type === "weapon" && <Sword className="h-4 w-4" />}
+                      {item.type === "shield" && <Shield className="h-4 w-4" />}
+                      {(item.type === "light-armor" ||
+                        item.type === "medium-armor" ||
+                        item.type === "heavy-armor") && (
+                        <Shield className="h-4 w-4" />
+                      )}
+                      {item.type === "accessory" && (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      <span className="text-sm text-muted-foreground">
+                        {item.type === "weapon"
+                          ? "무기"
+                          : item.type === "light-armor"
+                          ? "경갑옷"
+                          : item.type === "medium-armor"
+                          ? "중갑옷"
+                          : item.type === "heavy-armor"
+                          ? "중갑옷"
+                          : item.type === "shield"
+                          ? "방패"
+                          : "장신구"}
+                      </span>
+                    </div>
+
+                    {/* 레벨 요구사항 */}
+                    <div className="text-sm text-muted-foreground">
+                      필요 레벨: {item.requiredLevel}
+                    </div>
+
+                    {/* 기본 스탯 */}
+                    {(item.stats?.damage || item.stats?.defense) && (
+                      <div className="flex gap-4 text-sm">
+                        {item.stats?.damage && (
+                          <div className="flex items-center gap-1">
+                            <Sword className="h-3 w-3" />
+                            피해량: {item.stats.damage}
+                          </div>
+                        )}
+                        {item.stats?.defense && (
+                          <div className="flex items-center gap-1">
+                            <Shield className="h-3 w-3" />
+                            방어력: {item.stats.defense}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 특수 효과 */}
+                    {item.stats.effects && item.stats.effects.length > 0 && (
+                      <div className="space-y-1">
+                        {item.stats.effects.map(
+                          (effect: any, index: number) => (
+                            <div
+                              key={index}
+                              className="flex items-center gap-2 text-sm text-blue-500"
+                            >
+                              <Star className="h-3 w-3" />
+                              <span>
+                                {getEffectDescription(effect.type)}:{" "}
+                                {effect.value}
+                              </span>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 하단 버튼 */}
+                  <div className="mt-auto space-y-2">
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() =>
+                        handleSellItems(
+                          selectedCharacter._id.toString(),
+                          [item.inventoryIds[0]] // 1개만 판매
+                        )
+                      }
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Coins className="h-4 w-4 mr-2" />
+                      )}
+                      1개 판매 ({Math.floor(item.value * 0.6)} Gold)
+                    </Button>
+
+                    {item.count > 1 && (
+                      <Button
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() =>
+                          handleSellItems(
+                            selectedCharacter._id.toString(),
+                            item.inventoryIds // 전체 판매
+                          )
+                        }
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <Coins className="h-4 w-4 mr-2" />
+                        )}
+                        전체 판매 ({Math.floor(item.value * 0.6 * item.count)}{" "}
+                        Gold)
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="container mx-auto py-10 space-y-6">
+      {/* 상단 타이틀 섹션 */}
       <div className="text-center space-y-4">
         <div className="flex items-center justify-center gap-2">
           <Store className="h-8 w-8" />
@@ -256,136 +606,209 @@ export default function TownClient({
         </p>
       </div>
 
-      <Card className="overflow-hidden">
-        <MarketHeader />
-        <div className="p-4 bg-muted/50 border-t">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {items.length}개의 아이템이 거래되고 있습니다
-            </p>
-            {characters.length > 0 && (
-              <p className="text-sm">보유 캐릭터: {characters.length}명</p>
+      {/* 메인 컨텐츠 영역 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* 왼쪽: 상점 이미지 & 분위기 */}
+        <div className="space-y-6">
+          {marketImage && (
+            <div className="relative group">
+              <div className="aspect-square rounded-lg overflow-hidden bg-black/5">
+                <img
+                  src={marketImage}
+                  alt="Market"
+                  className="w-full h-full object-contain hover:scale-105 transition-transform duration-300"
+                />
+              </div>
+              <div className="mt-4 bg-muted rounded-lg p-4">
+                <p className="text-sm text-muted-foreground italic text-center">
+                  {MARKET_INFO[marketType].description}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 오른쪽: 거래 인터페이스 */}
+        <div className="space-y-6">
+          {/* 마켓 정보 카드 */}
+          <Card className="overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="space-y-1">
+                  <h2 className="text-2xl font-semibold">
+                    {MARKET_INFO[marketType].title}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {items.length}개의 아이템이 거래되고 있습니다
+                  </p>
+                </div>
+                <span
+                  className={`px-3 py-1 rounded-full text-sm font-medium ${MARKET_INFO[marketType].badgeColor}`}
+                >
+                  {MARKET_INFO[marketType].badge}
+                </span>
+              </div>
+
+              {/* 구매/판매 탭 */}
+              <div className="flex justify-center gap-4">
+                <Button
+                  variant={activeTab === "buy" ? "default" : "outline"}
+                  onClick={() => setActiveTab("buy")}
+                >
+                  구매
+                </Button>
+                <Button
+                  variant={activeTab === "sell" ? "default" : "outline"}
+                  onClick={() => setActiveTab("sell")}
+                >
+                  판매
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {/* 캐릭터 정보 */}
+          {characters.length > 0 && (
+            <Card className="p-4 bg-muted">
+              <p className="text-sm text-center">
+                보유 캐릭터: {characters.length}명
+              </p>
+            </Card>
+          )}
+
+          {/* 탭 컨텐츠 */}
+          <div className="space-y-4">
+            {activeTab === "buy" ? (
+              <div className="grid grid-cols-1 gap-4">
+                {isLoading ? (
+                  <Card className="p-8">
+                    <div className="flex justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin" />
+                    </div>
+                  </Card>
+                ) : (
+                  items.map((item) => (
+                    <Card
+                      key={item._id.toString()}
+                      className="p-4 hover:shadow-lg transition-shadow"
+                    >
+                      <div className="flex flex-col h-full">
+                        {/* 이름과 가격 */}
+                        <div className="flex items-center justify-between mb-4">
+                          <h3
+                            className={`font-semibold ${getRarityColor(
+                              item.rarity
+                            )}`}
+                          >
+                            {item.name}
+                          </h3>
+                          <div className="flex items-center gap-2">
+                            <Coins className="h-4 w-4" />
+                            <span>{item.value} Gold</span>
+                          </div>
+                        </div>
+
+                        {/* 장비 정보 */}
+                        <div className="flex-grow space-y-3 mb-4">
+                          {/* 아이템 타입 */}
+                          <div className="flex items-center gap-2">
+                            {item.type === "weapon" && (
+                              <Sword className="h-4 w-4" />
+                            )}
+                            {item.type === "shield" && (
+                              <Shield className="h-4 w-4" />
+                            )}
+                            {(item.type === "light-armor" ||
+                              item.type === "medium-armor" ||
+                              item.type === "heavy-armor") && (
+                              <Shield className="h-4 w-4" />
+                            )}
+                            {item.type === "accessory" && (
+                              <Sparkles className="h-4 w-4" />
+                            )}
+                            <span className="text-sm text-muted-foreground">
+                              {item.type === "weapon"
+                                ? "무기"
+                                : item.type === "light-armor"
+                                ? "경갑옷"
+                                : item.type === "medium-armor"
+                                ? "중갑옷"
+                                : item.type === "heavy-armor"
+                                ? "중갑옷"
+                                : item.type === "shield"
+                                ? "방패"
+                                : item.type === "accessory"
+                                ? "장신구"
+                                : "소비품"}
+                            </span>
+                          </div>
+
+                          {/* 레벨 요구사항 */}
+                          <div className="text-sm text-muted-foreground">
+                            필요 레벨: {item.requiredLevel}
+                          </div>
+
+                          {/* 기본 스탯 (데미지/방어력) */}
+                          {(item.stats?.damage || item.stats?.defense) && (
+                            <div className="flex gap-4 text-sm">
+                              {item.stats?.damage && (
+                                <div className="flex items-center gap-1">
+                                  <Sword className="h-3 w-3" />
+                                  피해량: {item.stats.damage}
+                                </div>
+                              )}
+                              {item.stats?.defense && (
+                                <div className="flex items-center gap-1">
+                                  <Shield className="h-3 w-3" />
+                                  방어력: {item.stats.defense}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 특수 효과 */}
+                          {item.stats?.effects &&
+                            item.stats.effects.length > 0 && (
+                              <div className="space-y-1">
+                                {item.stats.effects.map((effect, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex items-center gap-2 text-sm text-blue-500"
+                                  >
+                                    <Star className="h-3 w-3" />
+                                    <span>
+                                      {getEffectDescription(effect.type)}:{" "}
+                                      {effect.value}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                        </div>
+
+                        {/* 구매 버튼 */}
+                        <div className="mt-auto">
+                          <Button
+                            className="w-full"
+                            onClick={() => {
+                              setSelectedItem(item);
+                              setShowPurchaseDialog(true);
+                            }}
+                          >
+                            구매하기
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  ))
+                )}
+              </div>
+            ) : (
+              renderSellTab()
             )}
           </div>
         </div>
-      </Card>
-
-      {/* 상품 목록 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {isLoading ? (
-          <div className="col-span-full flex items-center justify-center min-h-[200px]">
-            <Loader2 className="h-8 w-8 animate-spin" />
-          </div>
-        ) : (
-          items.map((item) => (
-            <Card
-              key={item._id.toString()}
-              className="p-4 hover:shadow-lg transition-shadow relative"
-            >
-              <div className="space-y-4 min-h-[200px]">
-                {/* 이름과 가격 */}
-                <div className="flex items-center justify-between">
-                  <h3
-                    className={`font-semibold ${getRarityColor(item.rarity)}`}
-                  >
-                    {item.name}
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <Coins className="h-4 w-4" />
-                    <span>{item.value} Gold</span>
-                  </div>
-                </div>
-
-                {/* 장비 정보 */}
-                <div className="space-y-3">
-                  {/* 아이템 타입 */}
-                  <div className="flex items-center gap-2">
-                    {item.type === "weapon" && <Sword className="h-4 w-4" />}
-                    {item.type === "shield" && <Shield className="h-4 w-4" />}
-                    {(item.type === "light-armor" ||
-                      item.type === "medium-armor" ||
-                      item.type === "heavy-armor") && (
-                      <Shield className="h-4 w-4" />
-                    )}
-                    {item.type === "accessory" && (
-                      <Sparkles className="h-4 w-4" />
-                    )}
-                    <span className="text-sm text-muted-foreground">
-                      {item.type === "weapon"
-                        ? "무기"
-                        : item.type === "light-armor"
-                        ? "경갑옷"
-                        : item.type === "medium-armor"
-                        ? "중갑옷"
-                        : item.type === "heavy-armor"
-                        ? "중갑옷"
-                        : item.type === "shield"
-                        ? "방패"
-                        : item.type === "accessory"
-                        ? "장신구"
-                        : "소비품"}
-                    </span>
-                  </div>
-
-                  {/* 레벨 요구사항 */}
-                  <div className="text-sm text-muted-foreground">
-                    필요 레벨: {item.requiredLevel}
-                  </div>
-
-                  {/* 기본 스탯 (데미지/방어력) */}
-                  {(item.stats?.damage || item.stats?.defense) && (
-                    <div className="flex gap-4 text-sm">
-                      {item.stats?.damage && (
-                        <div className="flex items-center gap-1">
-                          <Sword className="h-3 w-3" />
-                          피해량: {item.stats.damage}
-                        </div>
-                      )}
-                      {item.stats?.defense && (
-                        <div className="flex items-center gap-1">
-                          <Shield className="h-3 w-3" />
-                          방어력: {item.stats.defense}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 특수 효과 */}
-                  {item.stats.effects && item.stats.effects.length > 0 && (
-                    <div className="space-y-1">
-                      {item.stats.effects.map((effect, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center gap-2 text-sm text-blue-500"
-                        >
-                          <Star className="h-3 w-3" />
-                          <span>
-                            {getEffectDescription(effect.type)}: {effect.value}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* 구매 버튼 - absolute positioning으로 하단 고정 */}
-                <div className="absolute bottom-4 left-4 right-4">
-                  <Button
-                    className="w-full"
-                    onClick={() => {
-                      setSelectedItem(item);
-                      setShowPurchaseDialog(true);
-                    }}
-                  >
-                    구매하기
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))
-        )}
       </div>
-
       {/* 아이템 구매 다이얼로그 */}
       <Dialog
         open={showPurchaseDialog}
@@ -480,21 +903,7 @@ export default function TownClient({
                     <SelectTrigger>
                       <SelectValue placeholder="캐릭터를 선택하세요" />
                     </SelectTrigger>
-                    <SelectContent>
-                      {characters.map((character) => (
-                        <SelectItem
-                          key={character._id.toString()}
-                          value={character._id.toString()}
-                        >
-                          <div className="flex justify-between items-center w-full">
-                            <span>
-                              {character.name} (Lv.{character.level})
-                            </span>
-                            <span className="ml-2">{character.gold} Gold</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
+                    {renderPurchaseDialogContent()}
                   </Select>
                 </div>
 

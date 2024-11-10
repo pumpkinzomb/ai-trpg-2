@@ -21,7 +21,7 @@ export async function POST(req: Request) {
       "base64"
     );
 
-    const uploadsDir = path.join(process.cwd(), "public", "uploads");
+    const uploadsDir = path.join(process.cwd(), "public", "uploads/users");
 
     try {
       await mkdir(uploadsDir, { recursive: true });
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
     await dbConnect();
 
-    const imageUrl = `/uploads/${fileName}`;
+    const imageUrl = `/uploads/users/${fileName}`;
     const user = await User.findOneAndUpdate(
       { email: session.user.email },
       { image: imageUrl },

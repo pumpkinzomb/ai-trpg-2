@@ -1,4 +1,7 @@
 import { HfInference } from "@huggingface/inference";
+import fs from "fs/promises";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
 
 const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
 
@@ -17,20 +20,47 @@ const BASE_STYLE_PROMPT = `
   .replace(/\s+/g, " ")
   .trim();
 
+async function ensureDirectoryExists(dirPath: string) {
+  try {
+    await fs.access(dirPath);
+  } catch (error) {
+    await fs.mkdir(dirPath, { recursive: true });
+  }
+}
+
 export async function generateImage(prompt: string): Promise<string | null> {
   try {
     const enhancedPrompt = `
-    Depict ${prompt},
-    Style: ${BASE_STYLE_PROMPT}
+      Depict ${prompt},
+      Style: ${BASE_STYLE_PROMPT}
     `.trim();
+
     const response = await hf.textToImage({
       inputs: enhancedPrompt,
       model: "black-forest-labs/FLUX.1-schnell",
     });
+
+    // 이미지 버퍼 생성
     const imageBuffer = Buffer.from(await response.arrayBuffer());
-    const base64Image = imageBuffer.toString("base64");
-    const contentType = "image/png";
-    return `data:${contentType};base64,${base64Image}`;
+
+    // 저장 경로 설정
+    const uploadDir = path.join(
+      process.cwd(),
+      "public",
+      "uploads",
+      "generated-image"
+    );
+    await ensureDirectoryExists(uploadDir);
+
+    // 유니크한 파일명 생성
+    const fileName = `${uuidv4()}.png`;
+    const filePath = path.join(uploadDir, fileName);
+
+    // 파일 저장
+    await fs.writeFile(filePath, imageBuffer);
+
+    // public 폴더 기준 상대 URL 반환
+    return `/uploads/generated-image/${fileName}`;
   } catch (error) {
     console.error("Error generating image:", error);
     return null;

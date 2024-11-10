@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     })
       .skip((page - 1) * limit)
       .limit(limit)
-      .populate("equipment.weapon equipment.armor equipment.shield")
+      .populate("equipment.weapon equipment.armor equipment.shield inventory")
       .lean();
 
     const total = await Character.countDocuments({
