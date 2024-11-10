@@ -203,3 +203,75 @@ export interface ValidatedGenerationItem extends GenerationItem {
   canEquip: boolean;
   restrictionReason?: string;
 }
+
+export interface RawItem {
+  name: string;
+  type: ItemType;
+  rarity: ItemRarity;
+  stats: {
+    damage?: string;
+    defense?: number;
+    effects: {
+      type: string;
+      value: string;
+    }[];
+  };
+  requiredLevel: number;
+  description: string;
+  value: number;
+}
+
+export interface GenerationDungeonLog {
+  type: "combat" | "trap" | "treasure" | "story" | "rest";
+  description: string;
+  image?: string;
+  data?: {
+    enemies?: {
+      name: string;
+      level: number;
+      hp: number;
+      ac: number;
+      attacks: {
+        name: string;
+        damage: string;
+        toHit: number;
+      }[];
+    }[];
+    requiredRoll?: number;
+    condition?: string;
+    rewards?: {
+      gold: number;
+      xp: number;
+      items: Item[];
+      goldLooted: boolean;
+    };
+    image?: string;
+  };
+  timestamp: Date;
+}
+
+export interface DungeonLog extends GenerationDungeonLog {
+  _id: Types.ObjectId;
+}
+
+export interface TemporaryLoot {
+  itemId: string;
+  logId: string;
+  timestamp: Date;
+}
+
+export interface DungeonState {
+  _id: string;
+  characterId: string;
+  dungeonName: string;
+  concept: string;
+  currentStage: number;
+  maxStages: number;
+  canEscape: boolean;
+  playerHP: number;
+  active: boolean;
+  temporaryInventory: TemporaryLoot[];
+  logs: DungeonLog[];
+  createdAt: Date;
+  updatedAt: Date;
+}

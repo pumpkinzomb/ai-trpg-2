@@ -57,7 +57,7 @@ export function WorldsClient() {
       icon: <Castle className="h-8 w-8" />,
       href: "/worlds/dungeon",
       color: "from-purple-500 to-indigo-600",
-      locked: true,
+      locked: false,
     },
     {
       title: "신전",

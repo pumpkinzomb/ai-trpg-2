@@ -138,18 +138,6 @@ const resourceColors: Record<
   },
 };
 
-// 직업별 색상 매핑
-const classColors: { [key: string]: { bg: string; text: string } } = {
-  Warrior: { bg: "from-red-600/10 to-orange-600/10", text: "text-red-600" },
-  Mage: { bg: "from-blue-600/10 to-purple-600/10", text: "text-blue-600" },
-  Rogue: { bg: "from-green-600/10 to-emerald-600/10", text: "text-green-600" },
-  Cleric: { bg: "from-yellow-600/10 to-amber-600/10", text: "text-yellow-600" },
-  Ranger: {
-    bg: "from-emerald-600/10 to-teal-600/10",
-    text: "text-emerald-600",
-  },
-};
-
 export function CharactersClient() {
   const router = useRouter();
   const { toast } = useToast();

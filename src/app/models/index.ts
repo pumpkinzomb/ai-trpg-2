@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { DungeonLog } from "../types";
 
 export interface IUser extends Document {
   _id: Schema.Types.ObjectId;
@@ -277,6 +278,107 @@ export interface ICharacter extends Document {
   profileImage: string;
 }
 
+const dungeonSchema = new Schema(
+  {
+    characterId: {
+      type: Schema.Types.ObjectId,
+      ref: "Character",
+      required: true,
+    },
+    dungeonName: {
+      type: String,
+      required: true,
+    },
+    concept: {
+      type: String,
+      required: true,
+    },
+    currentStage: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    maxStages: {
+      type: Number,
+      required: true,
+    },
+    canEscape: {
+      type: Boolean,
+      required: true,
+      default: true,
+    },
+    playerHP: {
+      type: Number,
+      required: true,
+    },
+    active: {
+      type: Boolean,
+      required: true,
+      default: true,
+    },
+    logs: [
+      {
+        type: {
+          type: String,
+          enum: ["combat", "trap", "treasure", "story", "rest"],
+          required: true,
+        },
+        description: {
+          type: String,
+          required: true,
+        },
+        image: String,
+        data: {
+          enemies: [
+            {
+              name: String,
+              level: Number,
+              hp: Number,
+              ac: Number,
+              attacks: [
+                {
+                  name: String,
+                  damage: String,
+                  toHit: Number,
+                },
+              ],
+            },
+          ],
+          requiredRoll: Number,
+          condition: String,
+          rewards: {
+            goldLooted: Boolean,
+            gold: Number,
+            xp: Number,
+            items: [Schema.Types.Mixed],
+          },
+        },
+        timestamp: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+  },
+  {
+    timestamps: true,
+  }
+);
+
+interface IDungeonState extends Document {
+  characterId: string;
+  dungeonName: string;
+  concept: string;
+  currentStage: number;
+  maxStages: number;
+  canEscape: boolean;
+  playerHP: number;
+  active: boolean;
+  logs: DungeonLog[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 interface ISpell extends Document {
   name: string;
   level: number;
@@ -346,6 +448,15 @@ interface IItem extends Document {
   description: string;
 }
 
+// 한 캐릭터당 하나의 active 던전만 허용
+dungeonSchema.index(
+  { characterId: 1, active: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { active: true },
+  }
+);
+
 // Models
 export const User =
   mongoose.models.User || mongoose.model<IUser>("User", userSchema);
@@ -358,3 +469,6 @@ export const Combat =
   mongoose.models.Combat || mongoose.model<ICombat>("Combat", combatSchema);
 export const Item =
   mongoose.models.Item || mongoose.model<IItem>("Item", itemSchema);
+export const Dungeon =
+  mongoose.models.Dungeon ||
+  mongoose.model<IDungeonState>("Dungeon", dungeonSchema);

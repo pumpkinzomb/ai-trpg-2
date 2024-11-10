@@ -3,95 +3,142 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import OpenAI from "openai";
 import { Item, Character } from "@/app/models";
-import { MarketType, ClassType, Item as IItem } from "@/app/types";
-import {
-  EQUIPMENT_RESTRICTIONS,
-  MARKET_TYPE_MULTIPLIERS,
-  validateGeneratedItem,
-} from "@/app/utils/item";
+import { Types } from "mongoose";
+import { MarketType, Item as IItem, ItemRarity, ItemType } from "@/app/types";
+import { MARKET_TYPE_MULTIPLIERS } from "@/app/utils/item";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-async function generateFantasyItems(
-  playerLevel: number,
-  playerClass: ClassType,
-  count: number
-) {
-  const restrictions = EQUIPMENT_RESTRICTIONS[playerClass];
-
+async function generateFantasyItems(playerLevel: number, count: number) {
   const prompt = `
-        Create ${count} unique fantasy RPG items for D&D 5E system.
-        Market Type: secret
-        Player Class: ${playerClass}
-        Player Level: ${playerLevel}
-        
-        Item Type Restrictions:
-        - ONLY create equipment items (NO potions, scrolls, or consumables)
-        - Focus on weapons, armor, shields, and accessories
-        
-        Class Restrictions:
-        - Allowed Weapons: ${restrictions.weapons.join(", ")}
-        - Allowed Armor: ${restrictions.armor.join(", ")}
-        - Can use shields: ${restrictions.shields}
-        
-        Equipment Guidelines:
-        - Weapons follow D&D damage dice (1d4, 1d6, 1d8, 1d10, 1d12, 2d6)
-        - Armor provides base AC (Light: 11-12, Medium: 13-15, Heavy: 14-18)
-        - Stats modifiers by rarity:
-          * Common: +1 to +2
-          * Uncommon: +2 to +3
-          * Rare: +3 to +4
-          * Epic: +4 to +5
-          * Legendary: +5 to +6
-        - Each item should include:
-          * Weight (based on type and materials)
-          * Durability (100 for new items)
-          * Unique effects based on rarity
-          * Detailed description and lore
-        
-        Balance Guidelines:
-        - Items should be appropriate for player level (${playerLevel})
-        - Focus on rare and unique magical equipment
-        - Consider class-specific bonuses and restrictions
-        - Equipment types must be one of: weapon, light-armor, medium-armor, heavy-armor, shield, accessory
-        
-        Return in strict JSON format matching the TypeScript interface shown previously.
-      `;
+  Create ${count} unique fantasy RPG items as JSON array. Each item must strictly follow this TypeScript interface and D&D 5e rules:
+
+  interface Item {
+    name: string;
+    type: "weapon" | "light-armor" | "medium-armor" | "heavy-armor" | "shield" | "accessory";
+    rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
+    stats: {
+      damage?: string;    // For weapons only, using D&D dice notation (e.g., "1d8", "2d6")
+      defense?: number;   // For armor and shields only, following D&D AC rules
+      effects: {
+        type: string;     // Effect type
+        value: string;    // Effect value using D&D notation
+      }[];
+    };
+    requiredLevel: number;
+    description: string;
+    value: number;       // Base gold value
+  }
+
+  Requirements:
+  - Level requirement should be around ${playerLevel}
+  - Value should be balanced for level (100-500 × level × rarity multiplier)
+  - Rarity multipliers: common(1x), uncommon(2x), rare(3x), epic(5x), legendary(10x)
+  
+  Equipment balance:
+  - Weapons: Follow D&D weapon damage dice (1d4 to 2d6) with optional bonuses (+1 to +3 based on rarity)
+  - Armor defense by type (based on D&D AC): 
+    * Light: 11-12 base AC
+    * Medium: 13-15 base AC
+    * Heavy: 14-18 base AC
+  - Shields: +2 base defense (AC)
+  
+  Valid effect types and formats (D&D 5e style):
+  Weapon effects:
+  - "Attack Bonus": "+1" to "+3"
+  - "Damage Bonus": "+1" to "+3"
+  - "Critical Range": "19-20" or "18-20"
+  - "Additional Damage": "1d4 fire" or "1d6 lightning"
+  
+  Armor/Shield effects:
+  - "Saving Throw Bonus": "+1" to "+3"
+  - "Magic Resistance": "advantage"
+  - "Damage Resistance": "slashing" or "piercing" or "bludgeoning"
+  
+  Accessory effects:
+  - "Ability Score": "+1 STR" or "+2 DEX" (max +2)
+  - "Skill Bonus": "+1 Athletics" or "+2 Stealth"
+  - "Initiative": "+1" to "+3"
+  - "Speed": "+5" or "+10" (in feet)
+  - "Save DC": "+1" to "+2"
+
+  Return ONLY the JSON array with no additional text.
+`;
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4-mini",
+      model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
+      response_format: { type: "json_object" },
     });
 
     const rawItems = JSON.parse(response.choices[0].message.content || "[]");
 
-    // 검증 전에 consumable 타입 필터링
-    const filteredItems = rawItems.filter(
-      (item: any) => item.type !== "consumable"
-    );
+    console.log("check rawItems", rawItems);
 
     const validatedItems = await Promise.all(
-      filteredItems.map(async (rawItem: any) => {
-        const validation = validateGeneratedItem(rawItem);
-        if (!validation.isValid || !validation.item) {
-          console.error(`Item validation failed: ${validation.error}`, rawItem);
-          return null;
-        }
-
-        // 한번 더 consumable 체크
-        if (validation.item.type === "consumable") {
-          return null;
-        }
-
+      rawItems.items.map(async (rawItem: any) => {
         try {
-          const newItem = await Item.create(validation.item);
+          // 기본적인 필드 존재 여부 확인
+          if (
+            !rawItem.name ||
+            !rawItem.type ||
+            !rawItem.rarity ||
+            !rawItem.stats ||
+            !rawItem.requiredLevel
+          ) {
+            console.error("Missing required fields:", rawItem);
+            return null;
+          }
+
+          // type 필드 유효성 검사
+          const validTypes: ItemType[] = [
+            "weapon",
+            "light-armor",
+            "medium-armor",
+            "heavy-armor",
+            "shield",
+            "accessory",
+          ];
+          if (!validTypes.includes(rawItem.type)) {
+            console.error("Invalid item type:", rawItem.type);
+            return null;
+          }
+
+          // rarity 필드 유효성 검사
+          const validRarities: ItemRarity[] = [
+            "common",
+            "uncommon",
+            "rare",
+            "epic",
+            "legendary",
+          ];
+          if (!validRarities.includes(rawItem.rarity)) {
+            console.error("Invalid rarity:", rawItem.rarity);
+            return null;
+          }
+
+          const rarityMultipliers: Record<ItemRarity, number> = {
+            common: 1,
+            uncommon: 2,
+            rare: 3,
+            epic: 5,
+            legendary: 10,
+          };
+
+          const baseValue = 100 + Math.floor(Math.random() * 400);
+          const itemRarity = rawItem.rarity as ItemRarity;
+          rawItem.value =
+            baseValue * rawItem.requiredLevel * rarityMultipliers[itemRarity];
+
+          // DB에 저장
+          const newItem = await Item.create(rawItem);
           return newItem;
         } catch (error) {
-          console.error("Failed to save item to DB:", error);
+          console.error("Item validation/creation error:", error);
           return null;
         }
       })
@@ -106,29 +153,30 @@ async function generateFantasyItems(
 
 async function getBlackMarketItems(
   playerLevel: number,
-  count: number,
-  playerClass: ClassType
+  count: number
 ): Promise<IItem[]> {
   try {
+    const baseItems = await Item.find({ isBaseItem: true });
     const baseItemIds = baseItems.map((item) => item._id.toString());
 
-    const availableItems = await Item.find({
-      _id: { $nin: baseItemIds },
-      ownerId: { $exists: false },
-      type: { $ne: "consumable" }, // consumable 타입 제외
-      requiredLevel: { $lte: playerLevel + 3 },
-    })
-      .sort(() => Math.random() - 0.5)
-      .limit(count);
+    const availableItems = await Item.aggregate([
+      {
+        $match: {
+          _id: { $nin: baseItemIds },
+          ownerId: { $exists: false },
+          type: { $ne: "consumable" },
+          requiredLevel: { $lte: playerLevel + 3 },
+        },
+      },
+      { $sample: { size: count } },
+    ]);
 
     if (availableItems.length < count) {
       const additionalCount = count - availableItems.length;
       const generatedItems = await generateFantasyItems(
         playerLevel,
-        playerClass,
         additionalCount
       );
-
       return [...availableItems, ...generatedItems];
     }
 
@@ -147,19 +195,8 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const playerLevel = parseInt(searchParams.get("level") || "1");
     const marketType = searchParams.get("marketType") as MarketType;
-    const playerClass = searchParams.get("class") as ClassType;
-
-    if (
-      !playerClass ||
-      !Object.keys(EQUIPMENT_RESTRICTIONS).includes(playerClass)
-    ) {
-      return NextResponse.json(
-        { error: "Invalid character class" },
-        { status: 400 }
-      );
-    }
+    const playerLevel = parseInt(searchParams.get("level") || "1");
 
     let items: IItem[] = [];
     const itemCounts = {
@@ -171,25 +208,16 @@ export async function GET(req: NextRequest) {
     // 마켓 타입별 아이템 로직
     switch (marketType) {
       case "secret":
-        items = await generateFantasyItems(
-          playerLevel,
-          playerClass,
-          itemCounts.secret
-        );
+        items = await generateFantasyItems(playerLevel, itemCounts.secret);
         break;
 
       case "black":
-        items = await getBlackMarketItems(
-          playerLevel,
-          itemCounts.black,
-          playerClass
-        );
+        items = await getBlackMarketItems(playerLevel, itemCounts.black);
         break;
 
       case "normal":
       default:
-        // 일반 시장에서는 모든 기본 아이템(소비 아이템 포함) 제공
-        items = [...baseItems];
+        items = await Item.find({ isBaseItem: true }).lean<IItem[]>();
         break;
     }
 
@@ -216,7 +244,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// 아이템 구매
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -239,17 +266,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 골드만 확인
     if (character.gold < item.value) {
       return NextResponse.json({ error: "Not enough gold" }, { status: 400 });
     }
 
-    // AI 생성 아이템인 경우 소유자 정보 업데이트
-    if (
-      !baseItems.some(
-        (baseItem) => baseItem._id.toString() === item._id.toString()
-      )
-    ) {
+    // 캐릭터 레벨 체크
+    if (character.level < item.requiredLevel) {
+      return NextResponse.json({ error: "Level too low" }, { status: 400 });
+    }
+
+    // 기본 아이템이 아닌 경우만 소유자 정보 업데이트
+    if (!item.isBaseItem) {
       item.ownerId = character._id;
       await item.save();
     }
@@ -283,9 +310,10 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const { characterId, itemId } = body;
 
-    // 캐릭터와 아이템 확인
     const [character, item] = await Promise.all([
-      Character.findById(characterId),
+      Character.findById(characterId).populate(
+        "equipment.weapon equipment.armor equipment.shield equipment.accessories"
+      ),
       Item.findById(itemId),
     ]);
 
@@ -296,7 +324,6 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // 아이템이 인벤토리에 있는지 확인
     if (!character.inventory.includes(item._id)) {
       return NextResponse.json(
         { error: "Item not in inventory" },
@@ -304,10 +331,14 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // 장착된 아이템 판매 방지
-    const isEquipped = Object.values(character.equipment).some(
-      (equip) => equip?._id?.toString() === item._id.toString()
-    );
+    // equipment 객체의 모든 값을 배열로 변환하여 체크
+    const isEquipped = [
+      character.equipment.weapon,
+      character.equipment.armor,
+      character.equipment.shield,
+      ...(character.equipment.accessories || []),
+    ].some((equip) => equip && equip._id?.toString() === item._id.toString());
+
     if (isEquipped) {
       return NextResponse.json(
         { error: "Cannot sell equipped items" },
@@ -315,23 +346,17 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // 판매 가격 계산 (아이템 기본 가격의 60%)
     const sellPrice = Math.floor(item.value * 0.6);
 
-    // AI 생성 아이템인 경우 소유자 정보 업데이트
-    if (
-      !baseItems.some(
-        (baseItem) => baseItem._id.toString() === item._id.toString()
-      )
-    ) {
+    if (!item.isBaseItem) {
       item.previousOwnerId = item.ownerId;
       item.ownerId = null;
       await item.save();
     }
 
-    // 캐릭터 인벤토리에서 제거하고 골드 지급
+    // inventory는 ObjectId[] 타입임을 명시
     character.inventory = character.inventory.filter(
-      (invItem) => invItem.toString() !== itemId
+      (invItem: Types.ObjectId) => invItem.toString() !== itemId
     );
     character.gold += sellPrice;
     await character.save();

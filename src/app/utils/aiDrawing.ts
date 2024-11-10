@@ -2,11 +2,6 @@ import { HfInference } from "@huggingface/inference";
 
 const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
 
-console.log(
-  "process.env.HUGGINGFACE_API_TOKEN",
-  process.env.HUGGINGFACE_API_TOKEN
-);
-
 const BASE_STYLE_PROMPT = `
   fantasy art style, high quality digital art, detailed illustration,
   vibrant colors with rich textures, soft magical lighting,
