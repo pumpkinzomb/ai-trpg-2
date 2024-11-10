@@ -6,6 +6,7 @@ import {
   Mountain,
   Scroll,
 } from "lucide-react";
+import { Character } from "../types";
 
 export const calculateInitialHP = (
   characterClass: string,
@@ -335,4 +336,249 @@ export const checkArmorClassRestriction = (
 
   // 착용하려는 방어구 타입이 허용된 목록에 있는지 확인
   return allowedArmorTypes.includes(armorType);
+};
+
+// 클래스 특성이 AC에 영향을 미치는지 확인하는 함수
+const getACBonusFromFeatures = (
+  character: Character,
+  baseAC: number,
+  hasArmor: boolean
+): number => {
+  let bonus = 0;
+
+  character.features.forEach((feature) => {
+    switch (feature.name) {
+      // 바바리안 특성
+      case "Unarmored Defense":
+        if (!hasArmor) {
+          // 이미 calculatePlayerAC에서 처리됨
+          break;
+        }
+        break;
+
+      // 바드 특성
+      case "College of Swords":
+        // Blade Flourish - defensive flourish 사용 시
+        // 실제 전투에서 bardic inspiration die를 소비할 때 처리해야 함
+        break;
+      case "College of Valor":
+        // 특별한 AC 보너스는 없지만 중장 숙련도 획득
+        break;
+
+      // 성직자 특성
+      case "Shield of Faith":
+        // 주문이므로 별도 처리 필요
+        break;
+
+      // 드루이드 특성
+      case "Primal Strike":
+        // AC에 영향 없음
+        break;
+
+      // 파이터 특성
+      case "Fighting Style":
+        if (feature.effect?.includes("Defense") && hasArmor) {
+          bonus += 1; // Defense fighting style: 방어구 착용 시 AC +1
+        }
+        break;
+      case "Eldritch Knight":
+        // Shield 주문 사용 가능 (별도 처리 필요)
+        break;
+
+      // 수도사 특성
+      case "Unarmored Movement":
+        // AC에 영향 없음
+        break;
+      case "Deflect Missiles":
+        // 원거리 공격에 대한 피해 감소 (별도 처리 필요)
+        break;
+      case "Way of the Kensei":
+        if (!hasArmor) {
+          bonus += 2; // Agile Parry: 무장하지 않은 상태에서 켄세이 무기로 근접 공격 시
+        }
+        break;
+
+      // 팔라딘 특성
+      case "Divine Shield":
+        // Shield of Faith 주문 사용 가능 (별도 처리 필요)
+        break;
+      case "Sacred Shield":
+        // 반응행동으로 사용하는 능력 (별도 처리 필요)
+        break;
+
+      // 레인저 특성
+      case "Deft Explorer":
+        // AC에 직접적 영향 없음
+        break;
+
+      // 로그 특성
+      case "Uncanny Dodge":
+        // 피해 반감 (별도 처리 필요)
+        break;
+      case "Evasion":
+        // 회피 (별도 처리 필요)
+        break;
+
+      // 소서러 특성
+      case "Draconic Resilience":
+        if (!hasArmor) {
+          bonus += 3; // 13 + Dex modifier (이미 기본 AC에 포함된 경우 주의)
+        }
+        break;
+      case "Stone's Durability":
+        if (!hasArmor) {
+          bonus += 1; // Stone Sorcery: AC +1
+        }
+        break;
+
+      // 워락 특성
+      case "Armor of Shadows":
+        if (!hasArmor) {
+          // Mage Armor 효과 (13 + Dex modifier)
+          bonus = Math.max(bonus, 3); // 기존 보너스와 비교하여 더 높은 값 사용
+        }
+        break;
+      case "Fiendish Resilience":
+        // 특정 피해 유형에 대한 저항 (별도 처리 필요)
+        break;
+
+      // 위저드 특성
+      case "Arcane Ward":
+        // 피해 흡수 (별도 처리 필요)
+        break;
+      case "Bladesinging":
+        if (!hasArmor && feature.effect?.includes("active")) {
+          const intMod = Math.floor((character.stats.intelligence - 10) / 2);
+          bonus += intMod; // Bladesong 활성화 시 INT 수정치만큼 AC 증가
+        }
+        break;
+    }
+  });
+
+  return bonus;
+};
+
+// 종족 보너스 확인 함수
+const getACBonusFromRace = (character: Character): number => {
+  let bonus = 0;
+
+  switch (character.race.toLowerCase()) {
+    case "warforged":
+      // 워포지드: 통합 보호 (Integrated Protection)
+      bonus += 1;
+      break;
+    case "loxodon":
+      // 록소돈: 자연 방어구 (Natural Armor) - 이미 기본 계산에 포함되므로 여기서는 처리하지 않음
+      break;
+    case "lizardfolk":
+      // 리자드포크: 자연 방어구 13 + Dex modifier - 기본 계산에서 처리
+      break;
+    case "tortles":
+      // 토틀: 자연 방어구 17 (Dex 무시) - 기본 계산에서 처리
+      break;
+    // 다른 종족들은 대부분 AC에 직접적인 영향을 주지 않음
+  }
+
+  return bonus;
+};
+
+// 개선된 AC 계산 함수
+export const calculatePlayerAC = (character?: Character): number => {
+  if (!character) return 10;
+
+  const dexMod = Math.floor((character.stats.dexterity - 10) / 2);
+  const wisMod = Math.floor((character.stats.wisdom - 10) / 2);
+  const conMod = Math.floor((character.stats.constitution - 10) / 2);
+
+  let baseAC = 10;
+  let maxDexBonus = Infinity;
+  let armorBonus = 0;
+  let shieldBonus = 0;
+
+  const hasArmor = !!character.equipment.armor;
+
+  // 자연 방어구 처리 (종족 특성)
+  switch (character.race.toLowerCase()) {
+    case "lizardfolk":
+      if (!hasArmor) {
+        baseAC = 13;
+      }
+      break;
+    case "tortles":
+      if (!hasArmor) {
+        return 17; // 고정 AC, Dex 무시
+      }
+      break;
+  }
+
+  // Unarmored Defense 체크 (Monk, Barbarian)
+  const hasUnarmoredDefense = character.features.some(
+    (f) => f.name === "Unarmored Defense"
+  );
+
+  if (!hasArmor && hasUnarmoredDefense) {
+    switch (character.class.toLowerCase()) {
+      case "monk":
+        return 10 + dexMod + wisMod;
+      case "barbarian":
+        return 10 + dexMod + conMod;
+    }
+  }
+
+  // 방어구 체크
+  if (hasArmor) {
+    const armor = character.equipment.armor;
+    armorBonus = armor?.stats.defense || 0;
+
+    switch (armor?.type) {
+      case "light-armor":
+        baseAC = armorBonus;
+        break;
+      case "medium-armor":
+        baseAC = armorBonus;
+        maxDexBonus = 2;
+        break;
+      case "heavy-armor":
+        return (
+          armorBonus +
+          (character.equipment.shield?.stats.defense || 0) +
+          getACBonusFromFeatures(character, armorBonus, true) +
+          getACBonusFromRace(character)
+        );
+    }
+  }
+
+  // 방패 보너스
+  if (character.equipment.shield) {
+    shieldBonus = character.equipment.shield.stats.defense || 0;
+  }
+
+  // 장신구 효과 적용
+  const accessoryBonus = character.equipment.accessories.reduce(
+    (bonus, accessory) => {
+      const acEffect = accessory.stats.effects?.find(
+        (effect) =>
+          effect.type === "ac_bonus" || effect.type === "defense_bonus"
+      );
+      return bonus + (acEffect ? parseInt(acEffect.value) || 0 : 0);
+    },
+    0
+  );
+
+  // 클래스 특성 보너스
+  const featureBonus = getACBonusFromFeatures(character, baseAC, hasArmor);
+
+  // 종족 보너스
+  const raceBonus = getACBonusFromRace(character);
+
+  // 최종 AC 계산
+  const finalDexBonus = Math.min(dexMod, maxDexBonus);
+  return (
+    baseAC +
+    finalDexBonus +
+    shieldBonus +
+    accessoryBonus +
+    featureBonus +
+    raceBonus
+  );
 };

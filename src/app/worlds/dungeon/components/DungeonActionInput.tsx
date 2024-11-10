@@ -7,6 +7,7 @@ interface DungeonActionInputProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
+  disabled: boolean;
 }
 
 export function DungeonActionInput({
@@ -14,6 +15,7 @@ export function DungeonActionInput({
   onChange,
   onSubmit,
   isLoading,
+  disabled,
 }: DungeonActionInputProps) {
   return (
     <Card className="mb-6">
@@ -23,11 +25,11 @@ export function DungeonActionInput({
           onChange={(e) => onChange(e.target.value)}
           className="w-full p-4 rounded-lg border min-h-[100px] bg-background"
           placeholder="행동을 입력하세요..."
-          disabled={isLoading}
+          disabled={disabled || isLoading}
         />
         <Button
           onClick={onSubmit}
-          disabled={isLoading || !value.trim()}
+          disabled={disabled || isLoading || !value.trim()}
           className="w-full"
         >
           {isLoading ? (

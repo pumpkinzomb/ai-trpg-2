@@ -1,11 +1,11 @@
-import { DungeonState, DungeonLog } from "@/app/types";
+import { DungeonLog, TemporaryLoot } from "@/app/types";
 import { Crown, Package, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface DungeonRewardsProps {
   rewards: NonNullable<DungeonLog["data"]>["rewards"];
   logId: string;
-  dungeonState: DungeonState;
+  temporaryInventory: TemporaryLoot[];
   onLootGold: (logId: string) => void;
   onLootItem: (itemId: string, logId: string) => void;
   disabled?: boolean;
@@ -14,17 +14,19 @@ interface DungeonRewardsProps {
 export function DungeonRewards({
   rewards,
   logId,
-  dungeonState,
+  temporaryInventory,
   onLootGold,
   onLootItem,
   disabled = false,
 }: DungeonRewardsProps) {
   const isItemLootedFromSpecificLog = (itemId: string, logId: string) => {
-    return dungeonState.temporaryInventory?.some(
+    return temporaryInventory?.some(
       (loot) =>
         loot.itemId.toString() === itemId && loot.logId.toString() === logId
     );
   };
+
+  console.log("temporaryInventory", temporaryInventory);
 
   if (!rewards || (!rewards.gold && !rewards.items?.length)) {
     return null;

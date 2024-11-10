@@ -136,7 +136,7 @@ async function generateFantasyItems(playerLevel: number, count: number) {
 
           // DB에 저장
           const newItem = await Item.create(rawItem);
-          return newItem;
+          return await Item.findById(newItem._id).lean<IItem>();
         } catch (error) {
           console.error("Item validation/creation error:", error);
           return null;
@@ -223,13 +223,15 @@ export async function GET(req: NextRequest) {
 
     // 마켓 타입에 따라 아이템 가격 조정
     const multiplier = MARKET_TYPE_MULTIPLIERS[marketType];
-    const adjustedItems = items.map((item) => ({
-      ...item,
-      value: Math.floor(
-        item.value *
-          (Math.random() * (multiplier.max - multiplier.min) + multiplier.min)
-      ),
-    }));
+    const adjustedItems = items.map((item) => {
+      return {
+        ...item,
+        value: Math.floor(
+          item.value *
+            (Math.random() * (multiplier.max - multiplier.min) + multiplier.min)
+        ),
+      };
+    });
 
     return NextResponse.json({
       marketType,

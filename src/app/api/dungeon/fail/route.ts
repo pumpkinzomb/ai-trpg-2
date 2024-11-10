@@ -46,12 +46,14 @@ export async function POST(req: NextRequest) {
 
     // 캐릭터 상태 업데이트 (페널티 적용)
     character.gold = Math.max(0, character.gold - penaltyResults.goldPenalty);
+    character.currentHp = 0;
     await character.save();
 
     return NextResponse.json({
       success: true,
       message: "Dungeon failed",
       penalties: penaltyResults,
+      hp: 0,
       redirectTo: "/worlds/temple", // 클라이언트에서 신전으로 리다이렉트하기 위한 정보
     });
   } catch (error) {

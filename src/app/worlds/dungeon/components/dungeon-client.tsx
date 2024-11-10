@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DungeonCombat from "./DungeonCombat";
 import { useToast } from "@/hooks/use-toast";
-import { Skull, UserPlus, Church } from "lucide-react";
+import { Skull, UserPlus, Church, Loader2 } from "lucide-react";
 import { DungeonHeader } from "./DungeonHeader";
 import { DungeonActionInput } from "./DungeonActionInput";
 import { DungeonRewards } from "./DungeonRewards";
@@ -43,6 +43,19 @@ interface EscapePenalties {
   }>;
 }
 
+interface CombatResult {
+  victory: boolean;
+  remainingHp: number;
+  rewards?: {
+    xp: number;
+    gold: number;
+    items?: Array<{
+      id: string;
+      name: string;
+    }>;
+  };
+}
+
 export function DungeonClient() {
   const { toast } = useToast();
   const router = useRouter();
@@ -73,6 +86,8 @@ export function DungeonClient() {
   );
   const [showEscapeResults, setShowEscapeResults] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [combatStarted, setCombatStarted] = useState(false);
+  const [combatProcessing, setCombatProcessing] = useState(false);
 
   useEffect(() => {
     fetchCharacters();
@@ -302,7 +317,7 @@ export function DungeonClient() {
       }
 
       const updatedDungeon = await response.json();
-      setDungeonState(dungeonState);
+      setDungeonState(updatedDungeon);
 
       // 현재 로그에서 아이템 정보 찾기
       const currentLog = updatedDungeon.logs[updatedDungeon.logs.length - 1];
@@ -439,6 +454,8 @@ export function DungeonClient() {
     if (!dungeonState || !selectedCharacter) return;
 
     try {
+      setCombatProcessing(true);
+
       const response = await fetch("/api/dungeon/combat-result", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -453,18 +470,18 @@ export function DungeonClient() {
       });
 
       if (!response.ok) throw new Error("Failed to process combat result");
-      const updatedDungeon = await response.json();
-      setDungeonState(updatedDungeon);
+      const data = await response.json();
 
-      if (!result.victory) {
-        // 전투 패배시 처리
-        handleDungeonFail();
-      } else {
-        // 승리 메시지
+      // 던전 상태 업데이트
+      setDungeonState(data.dungeon);
+
+      // 승리시에만 메시지 표시
+      if (result.victory) {
         toast({
           title: "전투 승리",
           description: "전투에서 승리했습니다!",
         });
+        setCombatStarted(false);
       }
     } catch (error) {
       console.error("Failed to process combat result:", error);
@@ -473,6 +490,8 @@ export function DungeonClient() {
         title: "전투 결과 처리 실패",
         description: "전투 결과를 처리하는데 실패했습니다.",
       });
+    } finally {
+      setCombatProcessing(false);
     }
   };
 
@@ -563,6 +582,10 @@ export function DungeonClient() {
     return dungeonState?.logs[dungeonState.logs.length - 1];
   };
 
+  const handleCombatStart = (value: boolean) => {
+    setCombatStarted(value);
+  };
+
   const isItemLootedFromSpecificLog = (
     itemId: string,
     logId: string,
@@ -612,6 +635,8 @@ export function DungeonClient() {
     );
   };
 
+  console.log("dungeonState", dungeonState);
+
   const currentLog = getCurrentLog();
   const rewards = currentLog?.data?.rewards;
 
@@ -639,27 +664,42 @@ export function DungeonClient() {
                 <CardContent>
                   {currentLog && (
                     <div className="space-y-4">
-                      <p className="text-lg">{currentLog.description}</p>
-
-                      {/* 이미지가 있는 경우 표시 */}
-                      {currentLog.image && (
-                        <div className="aspect-square w-full max-w-md mx-auto rounded-lg overflow-hidden">
-                          <img
-                            src={currentLog.image}
-                            alt="상황 이미지"
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
+                      {!combatStarted && (
+                        <>
+                          <p className="text-lg">{currentLog.description}</p>
+                          {currentLog.image && (
+                            <div className="aspect-square w-full max-w-md mx-auto rounded-lg overflow-hidden">
+                              <img
+                                src={currentLog.image}
+                                alt="상황 이미지"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          )}
+                        </>
                       )}
-
                       {/* 전투 상태 */}
                       {isInCombat(currentLog) && currentLog.data?.enemies && (
                         <DungeonCombat
                           enemies={currentLog.data.enemies}
                           playerHp={dungeonState.playerHP}
-                          character={selectedCharacter!}
+                          maxPlayerHp={selectedCharacter?.hp.max || 0}
+                          character={selectedCharacter || undefined}
                           onCombatEnd={handleCombatEnd}
+                          onCombatStart={handleCombatStart}
+                          dungeonConcept={dungeonState.concept}
+                          dungeonName={dungeonState.dungeonName}
                         />
+                      )}
+                      {combatProcessing && (
+                        <Card className="mt-4">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <p>전투 결과 처리 중...</p>
+                            </div>
+                          </CardContent>
+                        </Card>
                       )}
 
                       {/* 보상 표시 - gold나 items가 있을 때만 표시 */}
@@ -670,7 +710,7 @@ export function DungeonClient() {
                           <DungeonRewards
                             rewards={rewards}
                             logId={currentLog._id.toString()}
-                            dungeonState={dungeonState}
+                            temporaryInventory={dungeonState.temporaryInventory}
                             onLootGold={handleLootGold}
                             onLootItem={handleLoot}
                           />
@@ -692,6 +732,7 @@ export function DungeonClient() {
               <DungeonActionInput
                 value={userAction}
                 onChange={(value) => setUserAction(value)}
+                disabled={combatStarted}
                 isLoading={loadingState.action}
                 onSubmit={handleActionSubmit}
               />
