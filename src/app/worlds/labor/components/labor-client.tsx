@@ -63,7 +63,49 @@ export function LaborClient({ laborImage }: LaborClientProps) {
   const getCharacterId = (character: Character) => character._id.toString();
 
   useEffect(() => {
-    fetchCharacters();
+    const initializeData = async () => {
+      try {
+        // 1. 먼저 캐릭터 목록을 가져옴
+        const response = await fetch("/api/characters");
+        const data = await response.json();
+        setCharacters(data.characters);
+
+        // 2. 캐릭터 상태를 Promise.all로 한번에 요청
+        const statusPromises = data.characters.map((character: Character) =>
+          fetch(`/api/characters/status?characterId=${character._id}`).then(
+            (res) => res.json()
+          )
+        );
+
+        const characterStatuses = await Promise.all(statusPromises);
+
+        // 3. 상태 Map 업데이트
+        const statusMap = new Map();
+        characterStatuses.forEach((statusData, index) => {
+          if (statusData.success) {
+            statusMap.set(data.characters[index]._id, statusData.status);
+          }
+        });
+        setCharacterStatuses(statusMap);
+
+        // 4. 노역 중인 첫 번째 캐릭터 찾기
+        const laboringCharacter = data.characters.find(
+          (char: Character) => statusMap.get(char._id)?.status.labor.isActive
+        );
+
+        if (laboringCharacter) {
+          setSelectedCharacter(laboringCharacter);
+        }
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "오류",
+          description: "데이터를 불러오는데 실패했습니다.",
+        });
+      }
+    };
+
+    initializeData();
   }, []);
 
   useEffect(() => {
@@ -82,7 +124,7 @@ export function LaborClient({ laborImage }: LaborClientProps) {
     if (!selectedCharacter) return;
 
     const characterId = getCharacterId(selectedCharacter);
-    const laborStatus = getCharacterLaborStatus(characterId, characterStatuses);
+    const laborStatus = characterStatuses.get(characterId)?.status.labor;
     if (!laborStatus?.isActive || !laborStatus.endTime) {
       setTimeLeft(null);
       return;
@@ -94,7 +136,6 @@ export function LaborClient({ laborImage }: LaborClientProps) {
 
     if (difference <= 0) {
       setTimeLeft(0);
-      fetchCharacterStatus(characterId);
     } else {
       setTimeLeft(Math.ceil(difference / 1000));
     }
@@ -170,71 +211,32 @@ export function LaborClient({ laborImage }: LaborClientProps) {
   const startLabor = async () => {
     if (!selectedCharacter) return;
 
-    // 캐릭터 상태 재확인
-    const currentStatus = characterStatuses.get(
-      selectedCharacter._id.toString()
-    );
-    if (!currentStatus) {
-      toast({
-        variant: "destructive",
-        title: "오류",
-        description: "캐릭터 상태를 확인할 수 없습니다.",
-      });
-      return;
-    }
+    const characterId = getCharacterId(selectedCharacter);
+    const currentStatus = characterStatuses.get(characterId);
 
-    // 던전 활성화 상태 확인
-    if (currentStatus.status.dungeon.isActive) {
+    if (
+      currentStatus?.status.dungeon.isActive ||
+      currentStatus?.status.labor.isActive
+    ) {
       toast({
         variant: "destructive",
         title: "노역 불가",
-        description: "던전 탐험 중인 캐릭터는 노역을 시작할 수 없습니다.",
-      });
-      return;
-    }
-
-    // 이미 노역 중인지 확인
-    if (currentStatus.status.labor.isActive) {
-      toast({
-        variant: "destructive",
-        title: "노역 불가",
-        description: "이미 노역 중인 캐릭터입니다.",
+        description: "캐릭터가 다른 활동 중입니다.",
       });
       return;
     }
 
     setIsLoading(true);
     try {
-      // 상태 한번 더 최신화
-      await fetchCharacterStatus(selectedCharacter._id.toString());
-      const latestStatus = characterStatuses.get(
-        selectedCharacter._id.toString()
-      );
-
-      // 상태 재확인
-      if (
-        latestStatus?.status.dungeon.isActive ||
-        latestStatus?.status.labor.isActive
-      ) {
-        toast({
-          variant: "destructive",
-          title: "노역 불가",
-          description: "캐릭터가 다른 활동 중입니다.",
-        });
-        return;
-      }
-
       const startTime = new Date();
-      const endTime = new Date(startTime.getTime() + 3 * 60 * 60 * 1000); // 3시간
+      const endTime = new Date(startTime.getTime() + 3 * 60 * 60 * 1000);
       const baseReward = calculateBaseReward(selectedCharacter.level);
 
       const response = await fetch("/api/characters/status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          characterId: selectedCharacter._id.toString(),
+          characterId,
           statusType: "labor",
           data: {
             isActive: true,
@@ -246,21 +248,16 @@ export function LaborClient({ laborImage }: LaborClientProps) {
       });
 
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to start labor");
-      }
-
       if (data.success) {
         setCharacterStatuses((prev) =>
-          new Map(prev).set(selectedCharacter._id.toString(), data.status)
+          new Map(prev).set(characterId, data.status)
         );
         toast({
           title: "노역 시작",
-          description: `${selectedCharacter.name}이(가) 노역을 시작했습니다. 3시간 후에 보상을 받을 수 있습니다.`,
+          description: `${selectedCharacter.name}이(가) 노역을 시작했습니다.`,
         });
       }
     } catch (error) {
-      console.error("Labor start error:", error);
       toast({
         variant: "destructive",
         title: "오류",
@@ -283,7 +280,10 @@ export function LaborClient({ laborImage }: LaborClientProps) {
     setShowRewardDialog(true);
   };
 
-  const handleCollectAndRest = async (finalReward: number) => {
+  const handleCollectAndRest = async (
+    finalReward: number,
+    finalExp: number
+  ) => {
     if (!selectedCharacter) return;
     setIsLoading(true);
     try {
@@ -306,8 +306,8 @@ export function LaborClient({ laborImage }: LaborClientProps) {
       });
 
       if (response.ok) {
-        // 골드 지급
-        await fetch("/api/characters/reward", {
+        // 골드와 경험치 지급
+        const rewardResponse = await fetch("/api/characters/reward", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -315,18 +315,22 @@ export function LaborClient({ laborImage }: LaborClientProps) {
           body: JSON.stringify({
             characterId: selectedCharacter._id.toString(),
             gold: finalReward,
+            experience: finalExp,
           }),
         });
+
+        const rewardData = await rewardResponse.json();
 
         await fetchCharacterStatus(selectedCharacter._id.toString());
         await fetchCharacters();
 
         toast({
           title: "보상 수령 완료",
-          description: `${finalReward} 골드를 획득했습니다!`,
+          description: `${finalReward} 골드와 ${finalExp} 경험치를 획득했습니다!${
+            rewardData.levelUp ? " 레벨업!" : ""
+          }`,
         });
 
-        // 마을로 이동
         router.push("/worlds/town");
       }
     } catch (error) {
@@ -544,7 +548,7 @@ export function LaborClient({ laborImage }: LaborClientProps) {
                   {getCharacterLaborStatus(
                     getCharacterId(selectedCharacter),
                     characterStatuses
-                  )?.isActive ? (
+                  )?.isActive && timeLeft !== 0 ? (
                     <div className="p-4 bg-muted rounded-lg space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="font-medium">예상 보상:</span>
@@ -557,39 +561,37 @@ export function LaborClient({ laborImage }: LaborClientProps) {
                         * 3시간의 노동이 끝나면 보상을 수령할 수 있습니다
                       </div>
                     </div>
-                  ) : (
-                    /* 노동 완료 후 보상 수령 시점 */
-                    timeLeft === 0 && (
-                      <div className="p-4 bg-muted rounded-lg space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="font-medium">확실한 보상:</span>
-                          <span className="flex items-center gap-2">
-                            <Coins className="h-4 w-4 text-yellow-500" />
-                            {calculateBaseReward(selectedCharacter.level)} Gold
+                  ) : timeLeft === 0 ? (
+                    // 노동 완료 후 보상 수령 시점
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium">확실한 보상:</span>
+                        <span className="flex items-center gap-2">
+                          <Coins className="h-4 w-4 text-yellow-500" />
+                          {calculateBaseReward(selectedCharacter.level)} Gold
+                        </span>
+                      </div>
+
+                      <div className="mt-3 p-3 bg-black/5 rounded-lg border border-dashed border-yellow-500/50">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Dice6 className="h-5 w-5 text-yellow-500" />
+                          <span className="font-semibold text-yellow-500">
+                            도전해보시겠습니까?
                           </span>
                         </div>
-
-                        <div className="mt-3 p-3 bg-black/5 rounded-lg border border-dashed border-yellow-500/50">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Dice6 className="h-5 w-5 text-yellow-500" />
-                            <span className="font-semibold text-yellow-500">
-                              도전해보시겠습니까?
-                            </span>
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            "운이 좋다면 두 배의 보상을... 하지만 운이
-                            나쁘다면..."
-                            <br />
-                            상인이 장난스러운 미소와 함께 주사위를 건넵니다.
-                          </p>
-                        </div>
-
-                        <div className="text-xs text-muted-foreground italic">
-                          * 주사위의 결과에 따라 보상이 크게 달라질 수 있습니다
-                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          "운이 좋다면 두 배의 보상을... 하지만 운이
+                          나쁘다면..."
+                          <br />
+                          상인이 장난스러운 미소와 함께 주사위를 건넵니다.
+                        </p>
                       </div>
-                    )
-                  )}
+
+                      <div className="text-xs text-muted-foreground italic">
+                        * 주사위의 결과에 따라 보상이 크게 달라질 수 있습니다
+                      </div>
+                    </>
+                  ) : null}
 
                   {/* 작업 상태 및 타이머 */}
                   {getCharacterLaborStatus(
@@ -618,25 +620,89 @@ export function LaborClient({ laborImage }: LaborClientProps) {
                         </>
                       )}
 
-                      <Button
-                        className="w-full"
-                        onClick={collectReward}
-                        disabled={isLoading || !isLaborCompleted()}
-                      >
-                        {isLoading ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            처리 중...
-                          </>
-                        ) : !isLaborCompleted() ? (
-                          "작업 진행 중..."
-                        ) : (
-                          <>
-                            <Dice6 className="mr-2 h-4 w-4" />
-                            보상 수령하기
-                          </>
-                        )}
-                      </Button>
+                      {/* 보상 수령 버튼 영역 수정 */}
+                      {timeLeft === 0 && (
+                        <div className="space-y-3">
+                          <Button
+                            className="w-full bg-green-600 hover:bg-green-700"
+                            onClick={async () => {
+                              const baseReward = calculateBaseReward(
+                                selectedCharacter?.level || 0
+                              );
+                              const baseExp = Math.floor(baseReward * 0.1);
+                              await handleCollectAndRest(baseReward, baseExp);
+                            }}
+                            disabled={isLoading}
+                          >
+                            {isLoading ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                처리 중...
+                              </>
+                            ) : (
+                              <>
+                                <Coins className="mr-2 h-4 w-4" />
+                                안전하게 보상 수령하기 (
+                                {calculateBaseReward(
+                                  selectedCharacter?.level || 0
+                                )}{" "}
+                                Gold +{" "}
+                                {Math.floor(
+                                  calculateBaseReward(
+                                    selectedCharacter?.level || 0
+                                  ) * 0.1
+                                )}{" "}
+                                EXP)
+                              </>
+                            )}
+                          </Button>
+
+                          <div className="relative">
+                            <div className="absolute inset-0 flex items-center">
+                              <span className="w-full border-t" />
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                              <span className="bg-background px-2 text-muted-foreground">
+                                또는
+                              </span>
+                            </div>
+                          </div>
+
+                          <Button
+                            className="w-full bg-yellow-600 hover:bg-yellow-700"
+                            onClick={() => setShowRewardDialog(true)}
+                            disabled={isLoading}
+                          >
+                            {isLoading ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                처리 중...
+                              </>
+                            ) : (
+                              <>
+                                <Dice6 className="mr-2 h-4 w-4" />
+                                도박으로 더 많은 보상 노리기!
+                              </>
+                            )}
+                          </Button>
+
+                          <div className="mt-1 space-y-1">
+                            <div className="text-xs text-yellow-600 text-center italic">
+                              * 주사위 결과에 따라 0%~200% 사이의 보상을 받게
+                              됩니다
+                            </div>
+                            <div className="text-xs text-red-500 text-center">
+                              ⚠️ 대실패 시 모든 보상을 잃을 수 있습니다!
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {typeof timeLeft === "number" && timeLeft > 0 && (
+                        <Button className="w-full" disabled={true}>
+                          작업 진행 중...
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <Button
@@ -657,12 +723,6 @@ export function LaborClient({ laborImage }: LaborClientProps) {
                       )}
                     </Button>
                   )}
-
-                  {/* 안내 메시지 */}
-                  <div className="text-xs text-muted-foreground">
-                    * 노동은 3시간 동안 진행되며, 진행 중에는 해당 캐릭터를
-                    사용할 수 없습니다.
-                  </div>
                 </div>
               )}
             </div>

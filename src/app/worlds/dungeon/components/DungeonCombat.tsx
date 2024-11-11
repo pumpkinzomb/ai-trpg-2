@@ -1376,9 +1376,11 @@ export default function DungeonCombat({
   const AttackButton = ({
     onClick,
     selected,
+    targetIndex,
   }: {
     onClick: () => void;
     selected: boolean;
+    targetIndex: number;
   }) => (
     <Button
       size="sm"
@@ -1390,12 +1392,13 @@ export default function DungeonCombat({
       <div className="flex items-center justify-center gap-2 w-full h-full">
         <Sword className="w-4 h-4" />
         <span>공격</span>
-        <div className="flex items-center justify-center">
-          {" "}
-          <DiceIcon rolling={diceRolling} />
-        </div>
+        {diceRolling && selectedTarget === targetIndex && (
+          <div className="flex items-center justify-center">
+            <DiceIcon rolling={true} />
+          </div>
+        )}
       </div>
-      {diceResult && (
+      {diceResult && selectedTarget === targetIndex && (
         <div
           className={cn(
             "absolute -top-8 left-1/2 -translate-x-1/2",
@@ -1506,16 +1509,26 @@ export default function DungeonCombat({
                     <span>AC {calculatePlayerAC(character)}</span>
                   </div>
                 </div>
-                {character && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">
-                      {character.name}
-                    </span>
-                    <span className="text-xs px-2 py-1 rounded-full bg-primary/20">
-                      Lv.{character.level} {character.class}
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center gap-4">
+                  {character && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">
+                        {character.name}
+                      </span>
+                      <span className="text-xs px-2 py-1 rounded-full bg-primary/20">
+                        Lv.{character.level} {character.class}
+                      </span>
+                    </div>
+                  )}
+                  {isPlayerTurn && (
+                    <CombatInventory
+                      items={character?.inventory || []}
+                      onUseItem={handleUseItem}
+                      disabled={!isPlayerTurn || diceRolling}
+                      usedItems={usedItems}
+                    />
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1579,45 +1592,13 @@ export default function DungeonCombat({
                         </span>
                       </div>
                       {isPlayerTurn && enemy.currentHp > 0 && (
-                        <>
-                          <AttackButton
-                            onClick={() => handlePlayerAttack(index)}
-                            selected={selectedTarget === index}
-                          />
-                          <CombatInventory
-                            items={character?.inventory || []}
-                            onUseItem={handleUseItem}
-                            disabled={!isPlayerTurn || diceRolling}
-                            usedItems={usedItems}
-                          />
-                        </>
+                        <AttackButton
+                          onClick={() => handlePlayerAttack(index)}
+                          selected={selectedTarget === index}
+                          targetIndex={index}
+                        />
                       )}
                     </div>
-                    {combatState.effects.map((effect, index) => (
-                      <div
-                        key={index}
-                        className={cn(
-                          "absolute pointer-events-none animate-bounce text-lg font-bold",
-                          effect.type === "heal" && "text-green-500",
-                          effect.type === "buff" && "text-blue-500"
-                        )}
-                        style={{
-                          top:
-                            effect.target === "player"
-                              ? "50%"
-                              : `${effect.target * 100 + 50}px`,
-                          left: "50%",
-                          transform: "translate(-50%, -50%)",
-                        }}
-                      >
-                        {effect.text || (
-                          <>
-                            {effect.type === "heal" && `+${effect.value}`}
-                            {effect.type === "buff" && `+${effect.value}`}
-                          </>
-                        )}
-                      </div>
-                    ))}
                   </div>
                 </CardContent>
               </Card>

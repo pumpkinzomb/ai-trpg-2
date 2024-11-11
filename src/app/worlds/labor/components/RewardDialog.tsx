@@ -12,6 +12,7 @@ import { DiceRoll } from "./DiceRoll";
 
 interface RewardResult {
   reward: number;
+  experience: number;
   description: string;
   type: "critical" | "verygood" | "good" | "normal" | "bad" | "fail";
 }
@@ -20,8 +21,8 @@ interface RewardDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   baseReward: number;
-  onCollectAndRest: (finalReward: number) => void;
-  onCollectAndContinue: (finalReward: number) => void;
+  onCollectAndRest: (reward: number, experience: number) => void;
+  onCollectAndContinue: (reward: number, experience: number) => void;
 }
 
 export function RewardDialog({
@@ -39,38 +40,46 @@ export function RewardDialog({
     baseReward: number,
     diceRoll: number
   ): RewardResult => {
+    const baseExp = Math.floor(baseReward * 0.1); // 기본 경험치는 보상의 10%
+
     if (diceRoll === 20)
       return {
-        reward: baseReward * 2, // 대성공: 200%
-        description: "대성공! 보상이 2배가 됩니다!",
+        reward: baseReward * 2,
+        experience: baseExp * 2, // 경험치도 2배
+        description: "대성공! 보상과 경험치가 2배가 됩니다!",
         type: "critical",
       };
     if (diceRoll === 1)
       return {
-        reward: Math.floor(baseReward * 0.5), // 대실패: 50%
-        description: "대실패... 보상이 절반이 됩니다.",
+        reward: 0,
+        experience: 0, // 경험치도 없음
+        description: "대실패... 모든 보상을 잃었습니다!",
         type: "fail",
       };
     if (diceRoll >= 18)
       return {
-        reward: Math.floor(baseReward * 1.5), // 18-19: 150%
-        description: "매우 성공적! 보상이 1.5배가 됩니다!",
+        reward: Math.floor(baseReward * 1.5),
+        experience: Math.floor(baseExp * 1.5), // 경험치 1.5배
+        description: "매우 성공적! 보상과 경험치가 1.5배가 됩니다!",
         type: "verygood",
       };
     if (diceRoll >= 15)
       return {
-        reward: Math.floor(baseReward * 1.25), // 15-17: 125%
-        description: "성공적! 보상이 1.25배가 됩니다!",
+        reward: Math.floor(baseReward * 1.25),
+        experience: Math.floor(baseExp * 1.25), // 경험치 1.25배
+        description: "성공적! 보상과 경험치가 1.25배가 됩니다!",
         type: "good",
       };
     if (diceRoll <= 3)
       return {
-        reward: Math.floor(baseReward * 0.75), // 2-3: 75%
-        description: "실패... 보상이 75%가 됩니다.",
+        reward: Math.floor(baseReward * 0.75),
+        experience: Math.floor(baseExp * 0.75), // 경험치 75%
+        description: "실패... 보상과 경험치가 75%가 됩니다.",
         type: "bad",
       };
     return {
       reward: baseReward,
+      experience: baseExp,
       description: "평범한 결과입니다.",
       type: "normal",
     };
@@ -144,14 +153,24 @@ export function RewardDialog({
                 <Button
                   className="flex-1"
                   variant="default"
-                  onClick={() => onCollectAndRest(rewardResult.reward)}
+                  onClick={() =>
+                    onCollectAndRest(
+                      rewardResult.reward,
+                      rewardResult.experience
+                    )
+                  }
                 >
                   수령하고 휴식
                 </Button>
                 <Button
                   className="flex-1"
                   variant="outline"
-                  onClick={() => onCollectAndContinue(rewardResult.reward)}
+                  onClick={() =>
+                    onCollectAndContinue(
+                      rewardResult.reward,
+                      rewardResult.experience
+                    )
+                  }
                 >
                   수령하고 계속하기
                 </Button>
