@@ -63,7 +63,7 @@ function getRandomElement(arr: string[]): string {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-async function getOrGenerateTempleImage(): Promise<string> {
+async function getOrGenerateTempleImage(imageSlot?: number): Promise<string> {
   const publicDir = path.join(process.cwd(), "public");
   const uploadsDir = path.join(publicDir, "uploads");
   const generatedImageDir = path.join(uploadsDir, "generated-image");
@@ -78,7 +78,7 @@ async function getOrGenerateTempleImage(): Promise<string> {
     }
   }
 
-  const randomSlot = Math.floor(Math.random() * MAX_TEMPLE_IMAGES);
+  const randomSlot = imageSlot || Math.floor(Math.random() * MAX_TEMPLE_IMAGES);
   const imagePath = path.join(templeDir, `image${randomSlot}.png`);
   const imageUrlPath = `/uploads/generated-image/temple/image${randomSlot}.png`;
 
@@ -117,14 +117,26 @@ async function getOrGenerateTempleImage(): Promise<string> {
   }
 }
 
-export default async function TemplePage() {
+interface Props {
+  searchParams: { [key: string]: string | string[] | undefined };
+}
+
+export default async function TemplePage({ searchParams }: Props) {
   const session = await getServerSession(authOptions);
 
   if (!session) {
     redirect("/login");
   }
 
-  const templeImage = await getOrGenerateTempleImage();
+  const imageSlot = searchParams.slot
+    ? parseInt(searchParams.slot as string)
+    : Math.floor(Math.random() * MAX_TEMPLE_IMAGES);
+
+  if (!searchParams.slot) {
+    redirect(`/worlds/temple?slot=${imageSlot}`);
+  }
+
+  const templeImage = await getOrGenerateTempleImage(imageSlot);
 
   return <TempleClient templeImage={templeImage} />;
 }

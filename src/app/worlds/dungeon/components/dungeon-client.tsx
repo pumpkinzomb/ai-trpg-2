@@ -2,18 +2,25 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Character, DungeonState, DungeonLog, Item } from "@/app/types";
+import {
+  Character,
+  DungeonState,
+  DungeonLog,
+  Item,
+  UsedItem,
+} from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DungeonCombat from "./DungeonCombat";
 import { useToast } from "@/hooks/use-toast";
-import { Skull, UserPlus, Church, Loader2 } from "lucide-react";
+import { UserPlus, Loader2 } from "lucide-react";
 import { DungeonHeader } from "./DungeonHeader";
 import { DungeonActionInput } from "./DungeonActionInput";
 import { DungeonRewards } from "./DungeonRewards";
 import { DungeonLogs } from "./DungeonLogs";
 import { DungeonLoading } from "./DungeonLoading";
 import { CharacterSelect } from "./CharacterSelect";
+import DungeonFailure from "./DungeonFailure";
 import {
   ConfirmDeleteDialog,
   EscapeConfirmDialog,
@@ -43,16 +50,15 @@ interface EscapePenalties {
   }>;
 }
 
-interface CombatResult {
-  victory: boolean;
-  remainingHp: number;
-  rewards?: {
-    xp: number;
-    gold: number;
-    items?: Array<{
-      id: string;
-      name: string;
-    }>;
+interface CharacterStatus {
+  characterId: string;
+  status: {
+    dungeon: {
+      isActive: boolean;
+    };
+    labor: {
+      isActive: boolean;
+    };
   };
 }
 
@@ -60,6 +66,10 @@ export function DungeonClient() {
   const { toast } = useToast();
   const router = useRouter();
   const [characters, setCharacters] = useState<Character[]>([]);
+  const [characterStatuses, setCharacterStatuses] = useState<
+    Map<string, CharacterStatus>
+  >(new Map());
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<{
     logIndex: number;
     description: string;
@@ -99,6 +109,46 @@ export function DungeonClient() {
       if (!response.ok) throw new Error("Failed to fetch characters");
       const data = await response.json();
       setCharacters(data.characters);
+
+      // 캐릭터 상태 가져오기
+      const statusPromises = data.characters.map(
+        async (character: Character) => {
+          const statusResponse = await fetch(
+            `/api/characters/status?characterId=${character._id.toString()}`
+          );
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+            return {
+              character,
+              status: statusData.status,
+            };
+          }
+          return null;
+        }
+      );
+
+      const characterStatuses = (await Promise.all(statusPromises)).filter(
+        Boolean
+      );
+
+      // 상태 Map 업데이트
+      const statusMap = new Map();
+      characterStatuses.forEach(({ character, status }) => {
+        statusMap.set(character._id.toString(), status);
+      });
+      setCharacterStatuses(statusMap);
+
+      // 던전에 진입한 캐릭터 찾기
+      const dungeonCharacters = characterStatuses.filter(
+        ({ status }) => status.status.dungeon.isActive
+      );
+
+      // 던전에 진입한 캐릭터가 정확히 1명이면 자동 선택
+      if (dungeonCharacters.length === 1) {
+        const dungeonCharacter = dungeonCharacters[0].character;
+        setSelectedCharacter(dungeonCharacter);
+        await initializeDungeon(dungeonCharacter._id.toString());
+      }
     } catch (error) {
       console.error("Failed to fetch characters:", error);
       toast({
@@ -109,6 +159,19 @@ export function DungeonClient() {
     } finally {
       setLoadingState((prev) => ({ ...prev, init: false }));
     }
+  };
+
+  const isCharacterAvailable = (characterId: string) => {
+    const status = characterStatuses.get(characterId);
+    if (!status) return true;
+    return !status.status.labor.isActive;
+  };
+
+  const getCharacterStatusText = (characterId: string) => {
+    const status = characterStatuses.get(characterId);
+    if (!status) return null;
+    if (status.status.labor.isActive) return "노역 중";
+    return null;
   };
 
   const initializeDungeon = async (characterId: string) => {
@@ -450,6 +513,7 @@ export function DungeonClient() {
   const handleCombatEnd = async (result: {
     victory: boolean;
     remainingHp: number;
+    usedItems: UsedItem[];
   }) => {
     if (!dungeonState || !selectedCharacter) return;
 
@@ -465,6 +529,7 @@ export function DungeonClient() {
           result: {
             victory: result.victory,
             remainingHp: result.remainingHp,
+            usedItems: result.usedItems,
           },
         }),
       });
@@ -544,37 +609,15 @@ export function DungeonClient() {
         characters={characters}
         onSelect={handleCharacterSelect}
         onCreateNew={() => router.push("/character/create")}
+        isCharacterAvailable={isCharacterAvailable}
+        getCharacterStatusText={getCharacterStatusText}
       />
     );
   }
 
   // 던전 실패 상태
   if (dungeonState?.playerHP <= 0) {
-    return (
-      <div className="container mx-auto py-6">
-        <Card className="border-red-500">
-          <CardHeader>
-            <CardTitle className="text-red-500 flex items-center gap-2">
-              <Skull className="h-6 w-6" />
-              던전 탐험 실패
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-center text-muted-foreground">
-              당신은 의식을 잃었습니다... 신전에서 치료가 필요합니다.
-            </p>
-            <Button
-              onClick={handleDungeonFail}
-              className="w-full"
-              variant="destructive"
-            >
-              <Church className="mr-2 h-4 w-4" />
-              신전으로 이동
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return <DungeonFailure onMoveToTemple={handleDungeonFail} />;
   }
 
   // 현재 활성화된 로그를 가져오는 함수

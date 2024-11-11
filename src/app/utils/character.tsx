@@ -556,7 +556,7 @@ export const calculatePlayerAC = (character?: Character): number => {
   // 장신구 효과 적용
   const accessoryBonus = character.equipment.accessories.reduce(
     (bonus, accessory) => {
-      const acEffect = accessory.stats.effects?.find(
+      const acEffect = accessory.stats?.effects?.find(
         (effect) =>
           effect.type === "ac_bonus" || effect.type === "defense_bonus"
       );

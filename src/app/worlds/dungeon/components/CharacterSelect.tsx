@@ -23,6 +23,8 @@ interface CharacterSelectProps {
   characters: Character[];
   onSelect: (character: Character) => void;
   onCreateNew: () => void;
+  isCharacterAvailable: (characterId: string) => boolean;
+  getCharacterStatusText: (characterId: string) => string | null;
 }
 
 export function CharacterSelect({
@@ -32,6 +34,8 @@ export function CharacterSelect({
   characters,
   onSelect,
   onCreateNew,
+  isCharacterAvailable,
+  getCharacterStatusText,
 }: CharacterSelectProps) {
   return (
     <div className="container mx-auto py-6">
@@ -89,29 +93,48 @@ export function CharacterSelect({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
-            {characters.map((character) => (
-              <Card
-                key={character._id.toString()}
-                className="cursor-pointer hover:bg-accent transition-colors"
-                onClick={() => onSelect(character)}
-              >
-                <CardContent className="flex items-center p-4">
-                  <div className="w-12 h-12 rounded-full overflow-hidden mr-4">
-                    <img
-                      src={character.profileImage}
-                      alt={character.name}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold">{character.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Lv.{character.level} {character.race} {character.class}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {characters.map((character) => {
+              const statusText = getCharacterStatusText(
+                character._id.toString()
+              );
+              const available = isCharacterAvailable(character._id.toString());
+
+              return (
+                <Card
+                  key={character._id.toString()}
+                  className={`relative transition-colors ${
+                    available
+                      ? "cursor-pointer hover:bg-accent"
+                      : "opacity-70 cursor-not-allowed"
+                  }`}
+                  onClick={() => available && onSelect(character)}
+                >
+                  <CardContent className="flex items-center justify-between p-4">
+                    <div className="flex items-center">
+                      <div className="w-12 h-12 rounded-full overflow-hidden mr-4">
+                        <img
+                          src={character.profileImage}
+                          alt={character.name}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{character.name}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Lv.{character.level} {character.race}{" "}
+                          {character.class}
+                        </p>
+                      </div>
+                    </div>
+                    {statusText && (
+                      <span className="text-sm font-medium text-yellow-500">
+                        {statusText}
+                      </span>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
             <Button variant="outline" onClick={onCreateNew} className="w-full">
               <Plus className="mr-2 h-4 w-4" />새 캐릭터 만들기
             </Button>

@@ -69,12 +69,12 @@ export async function POST(req: NextRequest) {
       
       Response format (JSON):
       {
-        "description": string,        // Detailed scene description in Korean
+        "description": string,
         "type": "combat" | "trap" | "treasure" | "story" | "rest",
-        "imagePrompt": string,        // English prompt for image generation
+        "imagePrompt": string,
         "effects": {
-          "hpChange": number,         // HP change (-10 for damage, +5 for healing)
-          "stageProgress": boolean,   // Whether to progress to next stage
+          "hpChange": number,
+          "stageProgress": boolean    // true when the action leads to next stage
         },
         "combat": {                   // Optional combat data
           "enemies": [{
@@ -117,6 +117,19 @@ export async function POST(req: NextRequest) {
       - Character level and current dungeon stage
       - Balance rewards based on stage/difficulty
       - Combat difficulty appropriate for character level
+      
+      Important notes for stage progression:
+      - Set stageProgress to true when the action completes current stage objectives
+      - Consider room exploration, combat completion, puzzle solving as stage completion triggers
+      - Current stage: ${dungeon.currentStage + 1}, Max stages: ${
+      dungeon.maxStages
+    }
+      
+      ${
+        dungeon.currentStage === dungeon.maxStages - 1
+          ? "This is the final stage. Focus on concluding events."
+          : "Progress to next stage when appropriate."
+      }
       
       Return ONLY the JSON object with no additional text.
     `;
@@ -174,24 +187,43 @@ export async function POST(req: NextRequest) {
       timestamp: new Date(),
     };
 
-    // 던전 상태 업데이트
-    const updates: any = {
-      $push: { logs: newLog },
-      playerHP: Math.max(0, dungeon.playerHP + (result.effects.hpChange || 0)),
-    };
+    // 던전 상태 업데이트 로직 수정
+    const newHP = Math.max(
+      0,
+      dungeon.playerHP + (result.effects.hpChange || 0)
+    );
+    let newStage = dungeon.currentStage;
 
-    // 스테이지 진행 확인
+    // 스테이지 진행 조건 명확화
     if (
       result.effects.stageProgress &&
       dungeon.currentStage < dungeon.maxStages - 1
     ) {
-      updates.currentStage = dungeon.currentStage + 1;
+      newStage += 1;
     }
 
-    // 던전 상태 업데이트
-    const updatedDungeon = await Dungeon.findByIdAndUpdate(dungeonId, updates, {
-      new: true,
-    }).populate("characterId");
+    // updateOne 대신 findByIdAndUpdate 사용하여 업데이트 확인
+    const updatedDungeon = await Dungeon.findByIdAndUpdate(
+      dungeonId,
+      {
+        $set: {
+          playerHP: newHP,
+          currentStage: newStage,
+        },
+        $push: { logs: newLog },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).populate("characterId");
+
+    console.log("Stage Progress:", {
+      wasStageProgress: result.effects.stageProgress,
+      previousStage: dungeon.currentStage,
+      newStage: updatedDungeon.currentStage,
+      maxStages: dungeon.maxStages,
+    });
 
     return NextResponse.json(updatedDungeon);
   } catch (error) {

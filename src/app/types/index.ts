@@ -289,3 +289,12 @@ export interface EscapePenalties {
     name?: string;
   }>;
 }
+
+export interface UsedItem {
+  itemId: string;
+  timestamp: number;
+  effect: {
+    type: string;
+    value: string;
+  };
+}

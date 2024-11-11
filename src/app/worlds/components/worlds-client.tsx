@@ -12,6 +12,7 @@ import {
   Store,
   Lock,
   Loader2,
+  Pickaxe, // 새로 추가
 } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
@@ -81,6 +82,14 @@ export function WorldsClient() {
       icon: <Store className="h-8 w-8" />,
       href: "/worlds/town",
       color: "from-green-500 to-emerald-600",
+      locked: false,
+    },
+    {
+      title: "노역장",
+      description: "광산과 작업장에서 노동을 통해 안정적인 골드를 획득하세요",
+      icon: <Pickaxe className="h-8 w-8" />,
+      href: "/worlds/labor",
+      color: "from-yellow-600 to-amber-700",
       locked: false,
     },
   ];

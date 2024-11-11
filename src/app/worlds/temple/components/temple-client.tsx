@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 interface Character {
@@ -36,6 +37,7 @@ interface TempleClientProps {
 
 export function TempleClient({ templeImage }: TempleClientProps) {
   const { toast } = useToast();
+  const router = useRouter();
   const [characters, setCharacters] = useState<Character[]>([]);
   const [charactersInDungeon, setCharactersInDungeon] = useState<Set<string>>(
     new Set()
@@ -45,10 +47,16 @@ export function TempleClient({ templeImage }: TempleClientProps) {
   );
   const [isLoading, setIsLoading] = useState(false);
 
+  const handleNewTemple = () => {
+    router.push("/temple"); // URL 파라미터 없이 이동하면 새로운 이미지가 생성됨
+  };
+
   // 치료 비용 계산 함수
-  const calculateHealingCost = (level: number) => {
-    // 기본 비용 50골드에 레벨당 10골드씩 추가
-    return 50 + (level - 1) * 10;
+  const calculateHealingCost = (character: Character) => {
+    const baseFromGold = Math.floor(character.gold / 5); // 소지금의 1/5
+    const minimumCost = 20; // 최소 비용
+
+    return Math.max(minimumCost, baseFromGold);
   };
 
   useEffect(() => {
@@ -96,7 +104,7 @@ export function TempleClient({ templeImage }: TempleClientProps) {
 
   // 치료 가능 여부를 확인하는 함수 (골드 포함)
   const canBeHealed = (character: Character) => {
-    const healingCost = calculateHealingCost(character.level);
+    const healingCost = calculateHealingCost(character);
     return (
       needsHealing(character) &&
       character.gold >= healingCost &&
@@ -112,7 +120,7 @@ export function TempleClient({ templeImage }: TempleClientProps) {
     if (!needsHealing(character)) {
       return "치료가 필요하지 않습니다";
     }
-    const healingCost = calculateHealingCost(character.level);
+    const healingCost = calculateHealingCost(character);
     if (character.gold < healingCost) {
       return "골드가 부족합니다";
     }
@@ -156,7 +164,7 @@ export function TempleClient({ templeImage }: TempleClientProps) {
       return;
     }
 
-    const healingCost = calculateHealingCost(selectedCharacter.level);
+    const healingCost = calculateHealingCost(selectedCharacter);
 
     if (selectedCharacter.gold < healingCost) {
       toast({
@@ -361,13 +369,13 @@ export function TempleClient({ templeImage }: TempleClientProps) {
                     <div className="p-4 bg-muted rounded-lg">
                       <div className="flex justify-between items-center">
                         <span>
-                          치료 비용:{" "}
-                          {calculateHealingCost(selectedCharacter.level)} Gold
+                          치료 비용: {calculateHealingCost(selectedCharacter)}{" "}
+                          Gold
                         </span>
                         <span
                           className={
                             selectedCharacter.gold <
-                            calculateHealingCost(selectedCharacter.level)
+                            calculateHealingCost(selectedCharacter)
                               ? "text-red-500"
                               : ""
                           }

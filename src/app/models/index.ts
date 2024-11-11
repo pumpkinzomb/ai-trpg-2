@@ -221,6 +221,29 @@ const itemSchema = new Schema(
   }
 );
 
+const characterStatusSchema = new mongoose.Schema<ICharacterStatus>({
+  characterId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Character",
+    required: true,
+  },
+  status: {
+    dungeon: {
+      isActive: { type: Boolean, default: false },
+      dungeonId: { type: String },
+      startTime: { type: Date },
+      endTime: { type: Date },
+    },
+    labor: {
+      isActive: { type: Boolean, default: false },
+      startTime: { type: Date },
+      endTime: { type: Date },
+      reward: { type: Number },
+    },
+  },
+  lastUpdated: { type: Date, default: Date.now },
+});
+
 // Interfaces for TypeScript
 export interface ICharacter extends Document {
   userId: mongoose.Types.ObjectId;
@@ -276,6 +299,25 @@ export interface ICharacter extends Document {
     losses: number;
   };
   profileImage: string;
+}
+
+export interface ICharacterStatus {
+  characterId: mongoose.Types.ObjectId;
+  status: {
+    dungeon: {
+      isActive: boolean;
+      dungeonId?: string;
+      startTime?: Date;
+      endTime?: Date;
+    };
+    labor: {
+      isActive: boolean;
+      startTime?: Date;
+      endTime?: Date;
+      reward?: number;
+    };
+  };
+  lastUpdated: Date;
 }
 
 const dungeonSchema = new Schema(
@@ -493,3 +535,6 @@ export const Item =
 export const Dungeon =
   mongoose.models.Dungeon ||
   mongoose.model<IDungeonState>("Dungeon", dungeonSchema);
+export const CharacterStatus =
+  mongoose.models.CharacterStatus ||
+  mongoose.model<ICharacterStatus>("CharacterStatus", characterStatusSchema);

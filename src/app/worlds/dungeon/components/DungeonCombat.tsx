@@ -29,9 +29,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Character } from "@/app/types";
+import { Character, UsedItem } from "@/app/types";
 import { calculatePlayerAC } from "@/app/utils/character";
 import { useToast } from "@/hooks/use-toast";
+import CombatInventory from "./CombatInventory";
 import DiceIcon from "./DiceIcon";
 import CombatLog from "./CombatLog";
 
@@ -58,7 +59,11 @@ interface DungeonCombatProps {
   playerHp: number;
   maxPlayerHp: number;
   character?: Character;
-  onCombatEnd: (result: { victory: boolean; remainingHp: number }) => void;
+  onCombatEnd: (result: {
+    victory: boolean;
+    remainingHp: number;
+    usedItems: UsedItem[];
+  }) => void;
   onCombatStart: (value: boolean) => void;
   dungeonName: string;
   dungeonConcept: string;
@@ -126,6 +131,7 @@ export default function DungeonCombat({
       type: "normal" | "critical" | "miss" | "system";
     }>
   >([]);
+  const [usedItems, setUsedItems] = useState<UsedItem[]>([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState<number>(0);
   const [turnOrder, setTurnOrder] = useState<
     Array<{
@@ -288,7 +294,7 @@ export default function DungeonCombat({
 
     if (currentPlayerHp <= 0) {
       addCombatLog("플레이어가 쓰러졌습니다!", "system");
-      onCombatEnd({ victory: false, remainingHp: 0 });
+      onCombatEnd({ victory: false, remainingHp: 0, usedItems });
       isEnded = true;
     }
 
@@ -297,7 +303,7 @@ export default function DungeonCombat({
       // 이미 "쓰러졌습니다" 메시지가 출력된 후에만 전투 종료 메시지 출력
       setTimeout(() => {
         addCombatLog("모든 적을 물리쳤습니다!", "system");
-        onCombatEnd({ victory: true, remainingHp: currentPlayerHp });
+        onCombatEnd({ victory: true, remainingHp: currentPlayerHp, usedItems });
       }, 200);
       isEnded = true;
     }
@@ -376,22 +382,111 @@ export default function DungeonCombat({
     setSelectedTarget(null);
   }, [currentTurnIndex, turnOrder, enemyState, currentRound, checkCombatEnd]);
 
+  // 아이템 사용 처리 함수
+  const handleUseItem = useCallback(
+    async (itemId: string) => {
+      if (!character || !isPlayerTurn) return;
+
+      const item = character.inventory.find((i) => i._id.toString() === itemId);
+      if (!item) return;
+
+      let effectApplied = false;
+
+      // 아이템 효과 처리
+      for (const effect of item.stats.effects) {
+        switch (effect.type) {
+          case "heal": {
+            const [diceCount, diceSides] = effect.value.split("d");
+            const bonus = parseInt(effect.value.split("+")[1] || "0");
+            const healAmount =
+              rollDice(parseInt(diceSides), parseInt(diceCount)).total + bonus;
+
+            const newHp = Math.min(maxPlayerHp, currentPlayerHp + healAmount);
+            setCurrentPlayerHp(newHp);
+
+            showAttackEffect("heal", healAmount, "player");
+            addCombatLog(
+              `${character.name}이(가) ${item.name}을(를) 사용하여 ${healAmount}의 체력을 회복했습니다.`,
+              "system"
+            );
+            effectApplied = true;
+            break;
+          }
+          case "restore_resource": {
+            const restoreAmount = parseInt(effect.value);
+            // 실제 리소스 회복 처리는 서버에서 수행
+            showAttackEffect("buff", restoreAmount, "player");
+            addCombatLog(
+              `${character.name}이(가) ${item.name}을(를) 사용하여 ${restoreAmount}의 ${character.resource.name}을(를) 회복했습니다.`,
+              "system"
+            );
+            effectApplied = true;
+            break;
+          }
+          case "strength_boost":
+          case "dexterity_boost":
+          case "all_stats_boost": {
+            showAttackEffect("buff", parseInt(effect.value), "player");
+            addCombatLog(
+              `${character.name}이(가) ${item.name}의 효과로 강화되었습니다!`,
+              "system"
+            );
+            effectApplied = true;
+            break;
+          }
+        }
+      }
+
+      if (effectApplied) {
+        // 사용된 아이템 기록
+        setUsedItems((prev) => [
+          ...prev,
+          {
+            itemId,
+            timestamp: Date.now(),
+            effect: item.stats.effects[0],
+          },
+        ]);
+
+        // 시각적 효과 표시
+        toast({
+          title: "아이템 사용",
+          description: `${item.name}을(를) 사용했습니다.`,
+        });
+      }
+    },
+    [
+      character,
+      isPlayerTurn,
+      maxPlayerHp,
+      currentPlayerHp,
+      showAttackEffect,
+      addCombatLog,
+      toast,
+    ]
+  );
+
   // 전투 이미지 생성
   const generateCombatImage = async () => {
     if (!character) return;
 
     setCombatImage({ url: null, loading: true });
 
-    const enemyDescription = enemies
-      .map((e) => `${e.name} (Level ${e.level})`)
-      .join(" and ");
+    const characterStyle = character.equipment.weapon?.name
+      ? `wielding ${character.equipment.weapon.name}`
+      : character.class.toLowerCase() === "monk"
+      ? "in martial arts combat stance"
+      : "fighting with bare hands";
 
-    const prompt = `
-      A dramatic combat scene between a ${character.race} ${character.class} 
-      facing off against ${enemyDescription} in ${dungeonName || "a dungeon"}.
-      ${dungeonConcept || ""} 
-      Action-packed fantasy battle scene with dynamic poses and dramatic lighting.
-    `;
+    const characterDescription = `${character.race} ${character.class} ${characterStyle}`;
+
+    const enemyDescription = enemies.map((e) => e.name).join(" and ");
+
+    const prompt = `A dynamic combat scene in a fantasy ${dungeonName}. 
+      A ${characterDescription} locked in intense battle against ${enemyDescription}. 
+      Scene inspired by ${dungeonConcept}.
+      Dramatic lighting, dynamic poses, epic fantasy atmosphere.
+      High detail, cinematic composition, dramatic angle.`;
 
     try {
       const response = await fetch("/api/generate-image", {
@@ -525,7 +620,11 @@ export default function DungeonCombat({
 
           if (allEnemiesDead) {
             addCombatLog("모든 적을 물리쳤습니다!", "system");
-            onCombatEnd({ victory: true, remainingHp: currentPlayerHp });
+            onCombatEnd({
+              victory: true,
+              remainingHp: currentPlayerHp,
+              usedItems,
+            });
             return; // 전투 종료시 함수 종료
           }
         }
@@ -576,17 +675,46 @@ export default function DungeonCombat({
           attackRoll === 20 ? "critical" : attackRoll === 1 ? "miss" : "normal",
       });
 
-      // 플레이어 사망 처리 함수
       const handlePlayerDeath = () => {
         addCombatLog("플레이어가 쓰러졌습니다!", "system");
-        onCombatEnd({ victory: false, remainingHp: 0 });
-        return true; // 전투 종료를 나타내는 값 반환
+        onCombatEnd({ victory: false, remainingHp: 0, usedItems });
+        return true;
+      };
+
+      // 데미지 계산 함수 추가
+      const calculateDamage = (damageString: string): number => {
+        try {
+          // "2d6+3" 또는 "1d8" 형식의 문자열 파싱
+          const parts = damageString.split("+");
+          const dicePart = parts[0].trim(); // "2d6"
+          const bonusPart = parts[1]?.trim(); // "3" or undefined
+
+          const [diceCount, diceSides] = dicePart.split("d").map(Number);
+
+          // 유효성 검사
+          if (
+            isNaN(diceCount) ||
+            isNaN(diceSides) ||
+            diceCount <= 0 ||
+            diceSides <= 0
+          ) {
+            console.error(`Invalid damage string format: ${damageString}`);
+            return 1; // 기본 데미지 반환
+          }
+
+          const { total: diceRoll } = rollDice(diceSides, diceCount);
+          const bonus = bonusPart ? parseInt(bonusPart) : 0;
+
+          return diceRoll + (isNaN(bonus) ? 0 : bonus);
+        } catch (error) {
+          console.error(`Error calculating damage: ${error}`, damageString);
+          return 1; // 오류 발생시 기본 데미지 반환
+        }
       };
 
       if (attackRoll === 20) {
-        const [diceCount, diceSides] = attack.damage.split("d").map(Number);
-        const { total: damageRoll } = rollDice(diceSides, diceCount);
-        const criticalDamage = damageRoll * 2;
+        const damage = calculateDamage(attack.damage);
+        const criticalDamage = damage * 2;
 
         const newHp = Math.max(0, currentPlayerHp - criticalDamage);
         setCurrentPlayerHp(newHp);
@@ -601,15 +729,13 @@ export default function DungeonCombat({
           return handlePlayerDeath();
         }
       } else if (toHit >= playerAC && attackRoll !== 1) {
-        const [diceCount, diceSides] = attack.damage.split("d").map(Number);
-        const { total: damageRoll } = rollDice(diceSides, diceCount);
-
-        const newHp = Math.max(0, currentPlayerHp - damageRoll);
+        const damage = calculateDamage(attack.damage);
+        const newHp = Math.max(0, currentPlayerHp - damage);
         setCurrentPlayerHp(newHp);
 
-        showAttackEffect("damage", damageRoll, "player");
+        showAttackEffect("damage", damage, "player");
         addCombatLog(
-          `${enemy.name}의 ${attack.name} 공격이 플레이어에게 ${damageRoll}의 피해를 입혔습니다.`,
+          `${enemy.name}의 ${attack.name} 공격이 플레이어에게 ${damage}의 피해를 입혔습니다.`,
           "normal"
         );
 
@@ -624,13 +750,9 @@ export default function DungeonCombat({
         );
       }
 
-      // 잠시 대기 후 전투 종료 체크
       await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // 플레이어가 살아있을 경우에만 다음 턴으로
       nextTurn();
-
-      return false; // 전투가 계속됨을 나타냄
+      return false;
     },
     [
       enemyState,
@@ -1457,12 +1579,45 @@ export default function DungeonCombat({
                         </span>
                       </div>
                       {isPlayerTurn && enemy.currentHp > 0 && (
-                        <AttackButton
-                          onClick={() => handlePlayerAttack(index)}
-                          selected={selectedTarget === index}
-                        />
+                        <>
+                          <AttackButton
+                            onClick={() => handlePlayerAttack(index)}
+                            selected={selectedTarget === index}
+                          />
+                          <CombatInventory
+                            items={character?.inventory || []}
+                            onUseItem={handleUseItem}
+                            disabled={!isPlayerTurn || diceRolling}
+                            usedItems={usedItems}
+                          />
+                        </>
                       )}
                     </div>
+                    {combatState.effects.map((effect, index) => (
+                      <div
+                        key={index}
+                        className={cn(
+                          "absolute pointer-events-none animate-bounce text-lg font-bold",
+                          effect.type === "heal" && "text-green-500",
+                          effect.type === "buff" && "text-blue-500"
+                        )}
+                        style={{
+                          top:
+                            effect.target === "player"
+                              ? "50%"
+                              : `${effect.target * 100 + 50}px`,
+                          left: "50%",
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      >
+                        {effect.text || (
+                          <>
+                            {effect.type === "heal" && `+${effect.value}`}
+                            {effect.type === "buff" && `+${effect.value}`}
+                          </>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>

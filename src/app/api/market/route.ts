@@ -163,9 +163,7 @@ async function getBlackMarketItems(
       {
         $match: {
           _id: { $nin: baseItemIds },
-          ownerId: { $exists: false },
-          type: { $ne: "consumable" },
-          requiredLevel: { $lte: playerLevel + 3 },
+          ownerId: { $exists: false }, // 현재 주인이 없고
         },
       },
       { $sample: { size: count } },

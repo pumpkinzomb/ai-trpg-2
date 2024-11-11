@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Character, Dungeon } from "@/app/models";
 import { calculateEscapePenalties } from "../escape/route"; // 페널티 계산 함수 재사용
+import { Character as ICharacter } from "@/app/types";
 
 export async function POST(req: NextRequest) {
   try {
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
 
     // 캐릭터 상태 업데이트 (페널티 적용)
     character.gold = Math.max(0, character.gold - penaltyResults.goldPenalty);
-    character.currentHp = 0;
+    character.hp.current = 0;
     await character.save();
 
     return NextResponse.json({

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -18,6 +19,7 @@ import {
   Sword,
   Star,
   Sparkles,
+  Search,
   Store,
 } from "lucide-react";
 import {
@@ -43,19 +45,22 @@ interface MarketInfo {
 const MARKET_INFO: Record<MarketType, MarketInfo> = {
   normal: {
     title: "마을 시장",
-    description: "평화로운 마을의 일반적인 시장입니다.",
+    description:
+      "누구나 찾을 수 있는 마을의 중심가. 물건을 사고파는 상인들의 활기찬 목소리와 흥정하는 사람들로 늘 북적입니다. 평화로운 분위기 속에서 일상적인 거래가 이루어지는 정겨운 장소입니다.",
     badge: "일반",
     badgeColor: "bg-green-100 text-green-800",
   },
   secret: {
     title: "비밀 시장",
-    description: "신비로운 물건들이 거래되는 비밀스러운 시장입니다.",
+    description:
+      "평범한 상점가 어딘가에 숨겨진 비밀스러운 공간입니다. 이런 특별한 장소를 발견하다니, 오늘은 정말 행운이 따랐네요! 진귀한 물건들을 구경할 수 있는 기회를 놓치지 마세요.",
     badge: "비밀",
     badgeColor: "bg-purple-100 text-purple-800",
   },
   black: {
     title: "흑시장",
-    description: "어둠 속에서 이루어지는 위험한 거래의 장소입니다.",
+    description:
+      "어두운 골목을 지나다 우연히 마주친 은밀한 거래의 장소입니다. 모험가들이 획득한 특별한 물건들이 은밀히 거래되는 곳이죠. 위험할 수도 있지만, 누군가에겐 꼭 필요한 물건을 찾을 수 있을지도 모릅니다.",
     badge: "위험",
     badgeColor: "bg-red-100 text-red-800",
   },
@@ -81,6 +86,7 @@ export default function TownClient({
   const [activeTab, setActiveTab] = useState<MarketTab>("buy");
   const [selectedCharacterForSell, setSelectedCharacterForSell] =
     useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [charactersInDungeon, setCharactersInDungeon] = useState<Set<string>>(
     new Set()
   );
@@ -89,6 +95,15 @@ export default function TownClient({
     fetchCharacters();
     fetchMarket();
   }, []);
+
+  const filteredItems = items.filter((item) => {
+    const searchLower = searchQuery.toLowerCase();
+    return (
+      item.name.toLowerCase().includes(searchLower) ||
+      item.type.toLowerCase().includes(searchLower) ||
+      item.rarity.toLowerCase().includes(searchLower)
+    );
+  });
 
   const checkDungeonStatus = async (characters: Character[]) => {
     try {
@@ -676,6 +691,20 @@ export default function TownClient({
             </Card>
           )}
 
+          {activeTab === "buy" && (
+            <Card className="p-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="아이템 이름, 종류, 등급으로 검색"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </Card>
+          )}
+
           {/* 탭 컨텐츠 */}
           <div className="space-y-4">
             {activeTab === "buy" ? (
@@ -687,7 +716,7 @@ export default function TownClient({
                     </div>
                   </Card>
                 ) : (
-                  items.map((item) => (
+                  filteredItems.map((item) => (
                     <Card
                       key={item._id.toString()}
                       className="p-4 hover:shadow-lg transition-shadow"
