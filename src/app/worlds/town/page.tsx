@@ -4,13 +4,43 @@ import { redirect } from "next/navigation";
 import TownClient from "./components/town-client";
 import { generateImage } from "@/app/utils/aiDrawing";
 import { MarketType } from "@/app/types";
+import fs from "fs/promises";
+import path from "path";
 
-// 마켓 타입별 등장 확률
+const MAX_MARKET_IMAGES = 5;
+
 const MARKET_SPAWN_RATES = {
-  normal: 0.6, // 60%
-  black: 0.25, // 25%
-  secret: 0.15, // 15%
+  normal: 0.6,
+  black: 0.25,
+  secret: 0.15,
 } as const;
+
+// 각 마켓 타입별 다양한 프롬프트
+const MARKET_PROMPTS = {
+  normal: [
+    "A peaceful medieval fantasy marketplace in a friendly village, with local farmers selling fresh produce, craftsmen showing their work, warm sunlight and cheerful atmosphere",
+    "A cozy village marketplace with wooden stalls and happy villagers, children playing around fountains, merchants displaying daily goods and fresh food",
+    "A welcoming town square market with colorful awnings, locals trading goods, bakers selling fresh bread, and a peaceful community atmosphere",
+    "A bright and lively village marketplace, with friendly merchants, handcrafted goods, fresh vegetables, and villagers chatting peacefully",
+    "A harmonious village market scene with thatched roof stalls, local artisans, fresh produce displays, and peaceful townsfolk trading",
+  ],
+
+  secret: [
+    "A mystical hidden marketplace with floating magical artifacts, mysterious robed figures trading rare items, ethereal lights and magical wisps in the air",
+    "A secret magical bazaar concealed by illusions, with rare spell components, enchanted items glowing with power, and mysterious magical merchants",
+    "An ethereal marketplace between dimensions, with arcane artifacts, mysterious traders in elaborate robes, and swirling magical energies",
+    "A hidden mystical market with floating crystals, rare magical ingredients, mysterious hooded figures, and ancient magical artifacts",
+    "A secret arcane marketplace with magical fountains, floating enchanted items, mysterious wizard merchants, and glowing magical runes",
+  ],
+
+  black: [
+    "A dangerous black market in dark alleyways, with hooded figures trading illegal goods, ominous shadows, and flickering lanterns",
+    "A shady underground marketplace with suspicious dealers, contraband items hidden in shadows, and dangerous-looking customers lurking",
+    "A dangerous black market hidden in dark corners, with masked merchants, illegal goods in shadowy alcoves, and threatening atmosphere",
+    "A dimly lit black market in narrow streets, with dangerous traders, forbidden items, and menacing figures in the shadows",
+    "A treacherous black market scene with hooded dealers, illegal trades happening in shadows, and dangerous items displayed discreetly",
+  ],
+};
 
 function determineMarketType(): MarketType {
   const rand = Math.random();
@@ -26,6 +56,65 @@ function determineMarketType(): MarketType {
   return "normal";
 }
 
+async function getOrGenerateMarketImage(
+  marketType: MarketType
+): Promise<string> {
+  const publicDir = path.join(process.cwd(), "public");
+  const marketDir = path.join(
+    publicDir,
+    "uploads",
+    "generated-image",
+    "market",
+    marketType
+  );
+
+  // 각 마켓 타입별 디렉토리 생성
+  try {
+    await fs.access(marketDir);
+  } catch {
+    await fs.mkdir(marketDir, { recursive: true });
+    console.log(`Created directory: ${marketDir}`);
+  }
+
+  // 랜덤 슬롯 선택 (0-4)
+  const randomSlot = Math.floor(Math.random() * MAX_MARKET_IMAGES);
+  const imagePath = path.join(marketDir, `image${randomSlot}.png`);
+  const imageUrlPath = `/uploads/generated-image/market/${marketType}/image${randomSlot}.png`;
+
+  // 해당 슬롯의 이미지 존재 확인
+  try {
+    await fs.access(imagePath);
+    console.log(
+      `Using existing ${marketType} market image at slot ${randomSlot}`
+    );
+    return imageUrlPath;
+  } catch {
+    // 이미지가 없으면 새로 생성
+    console.log(
+      `Generating new ${marketType} market image for slot ${randomSlot}`
+    );
+
+    // 해당 마켓 타입의 프롬프트 중 랜덤 선택
+    const prompts = MARKET_PROMPTS[marketType];
+    const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+
+    const generatedImagePath = await generateImage(randomPrompt);
+
+    if (!generatedImagePath) {
+      throw new Error(
+        `Failed to generate ${marketType} market image for slot ${randomSlot}`
+      );
+    }
+
+    // 생성된 이미지를 해당 슬롯으로 이동
+    const sourceImagePath = path.join(publicDir, generatedImagePath);
+    await fs.rename(sourceImagePath, imagePath);
+    console.log(`Saved new ${marketType} market image to slot ${randomSlot}`);
+
+    return imageUrlPath;
+  }
+}
+
 export default async function TownPage() {
   const session = await getServerSession(authOptions);
 
@@ -33,20 +122,8 @@ export default async function TownPage() {
     redirect("/login");
   }
 
-  // 시장 타입 결정
   const marketType = determineMarketType();
-
-  // 시장 이미지 생성을 위한 프롬프트
-  const marketPrompts = {
-    secret:
-      "A mysterious and magical fantasy marketplace hidden in alcoves, with rare magical items floating in the air, golden light streaming through stained glass windows, mystical merchants in elaborate robes",
-    normal:
-      "A bustling medieval fantasy marketplace in a town square, with wooden stalls, colorful awnings, friendly merchants displaying their wares",
-    black:
-      "A shadowy fantasy black market in narrow alleyways, with hooded figures, mysterious artifacts, dim lanterns casting eerie shadows",
-  };
-
-  const marketImage = await generateImage(marketPrompts[marketType]);
+  const marketImage = await getOrGenerateMarketImage(marketType);
 
   return (
     <TownClient initialMarketType={marketType} marketImage={marketImage} />

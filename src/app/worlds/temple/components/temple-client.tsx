@@ -233,9 +233,8 @@ export function TempleClient({ templeImage }: TempleClientProps) {
                 </div>
                 <div className="mt-4 bg-muted rounded-lg p-4">
                   <p className="text-sm text-muted-foreground italic text-center">
-                    "빛나는 스테인드글라스 창을 통해 들어오는 성스러운 빛이
-                    당신의 지친 영혼을 감싸안습니다. 이곳에서 당신은 새로운
-                    희망과 치유를 발견할 수 있을 것입니다."
+                    "이 신성한 공간에서 당신의 지친 영혼은 치유되고, 흐려진 힘은
+                    되살아날 것입니다. 빛나는 희망이 당신과 함께하기를."
                   </p>
                 </div>
               </div>
