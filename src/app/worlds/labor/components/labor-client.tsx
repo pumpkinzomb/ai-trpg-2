@@ -164,7 +164,7 @@ export function LaborClient({ laborImage }: LaborClientProps) {
   };
 
   const calculateBaseReward = (level: number) => {
-    return Math.floor(100 + level * 15); // 기본 100골드 + 레벨당 15골드
+    return Math.floor(300 + level * 15); // 기본 100골드 + 레벨당 15골드
   };
 
   const startLabor = async () => {
@@ -540,19 +540,56 @@ export function LaborClient({ laborImage }: LaborClientProps) {
               {/* 선택된 캐릭터 정보와 상태 표시 */}
               {selectedCharacter && (
                 <div className="space-y-4">
-                  {/* 예상 보상 정보 */}
-                  <div className="p-4 bg-muted rounded-lg space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="font-medium">예상 보상:</span>
-                      <span className="flex items-center gap-2">
-                        <Coins className="h-4 w-4 text-yellow-500" />
-                        {calculateBaseReward(selectedCharacter.level)} Gold
-                      </span>
+                  {/* 예상 보상 정보 - 노동 진행 중일 때 */}
+                  {getCharacterLaborStatus(
+                    getCharacterId(selectedCharacter),
+                    characterStatuses
+                  )?.isActive ? (
+                    <div className="p-4 bg-muted rounded-lg space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium">예상 보상:</span>
+                        <span className="flex items-center gap-2">
+                          <Coins className="h-4 w-4 text-yellow-500" />
+                          {calculateBaseReward(selectedCharacter.level)} Gold
+                        </span>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        * 3시간의 노동이 끝나면 보상을 수령할 수 있습니다
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      * 주사위 굴림에 따라 ±20%의 변동이 있을 수 있습니다
-                    </div>
-                  </div>
+                  ) : (
+                    /* 노동 완료 후 보상 수령 시점 */
+                    timeLeft === 0 && (
+                      <div className="p-4 bg-muted rounded-lg space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium">확실한 보상:</span>
+                          <span className="flex items-center gap-2">
+                            <Coins className="h-4 w-4 text-yellow-500" />
+                            {calculateBaseReward(selectedCharacter.level)} Gold
+                          </span>
+                        </div>
+
+                        <div className="mt-3 p-3 bg-black/5 rounded-lg border border-dashed border-yellow-500/50">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Dice6 className="h-5 w-5 text-yellow-500" />
+                            <span className="font-semibold text-yellow-500">
+                              도전해보시겠습니까?
+                            </span>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            "운이 좋다면 두 배의 보상을... 하지만 운이
+                            나쁘다면..."
+                            <br />
+                            상인이 장난스러운 미소와 함께 주사위를 건넵니다.
+                          </p>
+                        </div>
+
+                        <div className="text-xs text-muted-foreground italic">
+                          * 주사위의 결과에 따라 보상이 크게 달라질 수 있습니다
+                        </div>
+                      </div>
+                    )
+                  )}
 
                   {/* 작업 상태 및 타이머 */}
                   {getCharacterLaborStatus(
