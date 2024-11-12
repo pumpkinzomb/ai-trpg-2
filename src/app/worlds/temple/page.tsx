@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { generateImage } from "@/app/utils/aiDrawing";
+import { generateImage, saveGeneratedImage } from "@/app/utils/aiDrawing";
 import { TempleClient } from "./components/temple-client";
 import fs from "fs/promises";
 import path from "path";
@@ -64,28 +64,20 @@ function getRandomElement(arr: string[]): string {
 }
 
 async function getOrGenerateTempleImage(imageSlot?: number): Promise<string> {
-  const publicDir = path.join(process.cwd(), "public");
-  const uploadsDir = path.join(publicDir, "uploads");
-  const generatedImageDir = path.join(uploadsDir, "generated-image");
-  const templeDir = path.join(generatedImageDir, "temple");
-
-  for (const dir of [uploadsDir, generatedImageDir, templeDir]) {
-    try {
-      await fs.access(dir);
-    } catch {
-      await fs.mkdir(dir, { recursive: true });
-      console.log(`Created directory: ${dir}`);
-    }
-  }
-
   const randomSlot = imageSlot || Math.floor(Math.random() * MAX_TEMPLE_IMAGES);
-  const imagePath = path.join(templeDir, `image${randomSlot}.png`);
-  const imageUrlPath = `/uploads/generated-image/temple/image${randomSlot}.png`;
+  const expectedPath = path.join(
+    process.cwd(),
+    "public",
+    "uploads",
+    "generated-image",
+    "temple",
+    `image${randomSlot}.png`
+  );
 
   try {
-    await fs.access(imagePath);
+    await fs.access(expectedPath);
     console.log(`Using existing image at slot ${randomSlot}`);
-    return imageUrlPath;
+    return `/uploads/generated-image/temple/image${randomSlot}.png`;
   } catch {
     console.log(`Generating new image for slot ${randomSlot}`);
 
@@ -104,16 +96,15 @@ async function getOrGenerateTempleImage(imageSlot?: number): Promise<string> {
     console.log(`Using prompt: ${templeImagePrompt}`);
 
     const generatedImagePath = await generateImage(templeImagePrompt);
-
     if (!generatedImagePath) {
       throw new Error(`Failed to generate temple image for slot ${randomSlot}`);
     }
 
-    const sourceImagePath = path.join(publicDir, generatedImagePath);
-    await fs.rename(sourceImagePath, imagePath);
-    console.log(`Saved new image to slot ${randomSlot}`);
-
-    return imageUrlPath;
+    return await saveGeneratedImage(
+      generatedImagePath,
+      "temple",
+      `image${randomSlot}`
+    );
   }
 }
 

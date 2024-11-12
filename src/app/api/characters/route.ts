@@ -4,7 +4,7 @@ import { Character } from "@/app/models";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Types } from "mongoose";
-import { generateImage } from "@/app/utils/aiDrawing";
+import { generateImage, saveGeneratedImage } from "@/app/utils/aiDrawing";
 
 export async function GET(req: NextRequest) {
   try {
@@ -52,33 +52,48 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     await dbConnect();
-    const session = await getServerSession(authOptions);
+    const authSession = await getServerSession(authOptions);
 
-    if (!session) {
+    if (!authSession) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const characterData = await req.json();
-    const userId = session.user.id;
+    const userId = authSession.user.id;
 
-    console.log("characterData", characterData);
-
-    // 캐릭터 이미지 생성을 위한 프롬프트 구성
+    // 이미지 생성 (가장 오래 걸리고 실패 가능성이 높은 작업)
     const imagePrompt = `
-    a ${characterData.race} ${characterData.class} named ${characterData.name},
-    full body shot, 
-    fantasy character portrait
-  `.trim();
+      a ${characterData.race} ${characterData.class} named ${characterData.name},
+      full body shot,
+      fantasy character portrait
+    `.trim();
 
-    const profileImage = await generateImage(imagePrompt);
+    const generatedImagePath = await generateImage(imagePrompt);
+    if (!generatedImagePath) {
+      throw new Error("Failed to generate character profile image");
+    }
 
+    // 캐릭터 생성
     const character = await Character.create({
       ...characterData,
-      profileImage,
       userId: new Types.ObjectId(userId),
     });
 
-    return NextResponse.json(character, { status: 201 });
+    // 생성된 이미지 저장 및 이동
+    const savedImagePath = await saveGeneratedImage(
+      generatedImagePath,
+      `users/${userId}/characters/${character._id.toString()}`,
+      "profile"
+    );
+
+    // 캐릭터 문서에 이미지 경로 업데이트
+    const updatedCharacter = await Character.findByIdAndUpdate(
+      character._id,
+      { profileImage: savedImagePath },
+      { new: true }
+    );
+
+    return NextResponse.json(updatedCharacter, { status: 201 });
   } catch (error) {
     console.error("POST Character error:", error);
     return NextResponse.json(

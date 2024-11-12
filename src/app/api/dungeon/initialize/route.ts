@@ -39,7 +39,7 @@ async function generateDungeon(playerLevel: number): Promise<{
       * hard (CR ${playerLevel + 1} ~ ${playerLevel + 2}): 5-7층
     
     환경 묘사시 고려사항:
-    - D&D의 전형적인 환경 유형 사용 (예: 지하 묘지, 고대 신전, 자연 동굴 등)
+    - D&D의 전형적인 환경 유형 사용 
     - 잠재적 위험과 보물에 대한 암시
     - 주요 몬스터나 적대 세력의 흔적
     - 마법적 또는 기계적 장치의 존재 가능성

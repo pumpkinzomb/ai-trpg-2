@@ -66,3 +66,35 @@ export async function generateImage(prompt: string): Promise<string | null> {
     return null;
   }
 }
+
+export async function saveGeneratedImage(
+  generatedImagePath: string,
+  destinationDir: string,
+  filename: string
+): Promise<string> {
+  const publicDir = path.join(process.cwd(), "public");
+  const uploadsDir = path.join(publicDir, "uploads");
+  const generatedImageDir = path.join(uploadsDir, "generated-image");
+
+  // 대상 디렉토리 전체 경로
+  const fullDestinationDir = path.join(generatedImageDir, destinationDir);
+
+  // 필요한 디렉토리 생성
+  try {
+    await fs.access(fullDestinationDir);
+  } catch {
+    await fs.mkdir(fullDestinationDir, { recursive: true });
+    console.log(`Created directory: ${fullDestinationDir}`);
+  }
+
+  // 원본 경로와 대상 경로 설정 (generatedImagePath에서 파일명 추출)
+  const sourcePath = path.join(publicDir, generatedImagePath);
+  const destinationPath = path.join(fullDestinationDir, `${filename}.png`);
+
+  // 이미지 파일 이동
+  await fs.rename(sourcePath, destinationPath);
+  console.log(`Saved image to: ${destinationPath}`);
+
+  // URL 경로 반환
+  return `/uploads/generated-image/${destinationDir}/${filename}.png`;
+}

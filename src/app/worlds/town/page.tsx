@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import TownClient from "./components/town-client";
-import { generateImage } from "@/app/utils/aiDrawing";
+import { generateImage, saveGeneratedImage } from "@/app/utils/aiDrawing";
 import { MarketType } from "@/app/types";
 import fs from "fs/promises";
 import path from "path";
@@ -59,37 +59,24 @@ function determineMarketType(): MarketType {
 async function getOrGenerateMarketImage(
   marketType: MarketType
 ): Promise<string> {
-  const publicDir = path.join(process.cwd(), "public");
-  const marketDir = path.join(
-    publicDir,
+  const randomSlot = Math.floor(Math.random() * MAX_MARKET_IMAGES);
+  const expectedPath = path.join(
+    process.cwd(),
+    "public",
     "uploads",
     "generated-image",
     "market",
-    marketType
+    marketType,
+    `image${randomSlot}.png`
   );
 
-  // 각 마켓 타입별 디렉토리 생성
   try {
-    await fs.access(marketDir);
-  } catch {
-    await fs.mkdir(marketDir, { recursive: true });
-    console.log(`Created directory: ${marketDir}`);
-  }
-
-  // 랜덤 슬롯 선택 (0-4)
-  const randomSlot = Math.floor(Math.random() * MAX_MARKET_IMAGES);
-  const imagePath = path.join(marketDir, `image${randomSlot}.png`);
-  const imageUrlPath = `/uploads/generated-image/market/${marketType}/image${randomSlot}.png`;
-
-  // 해당 슬롯의 이미지 존재 확인
-  try {
-    await fs.access(imagePath);
+    await fs.access(expectedPath);
     console.log(
       `Using existing ${marketType} market image at slot ${randomSlot}`
     );
-    return imageUrlPath;
+    return `/uploads/generated-image/market/${marketType}/image${randomSlot}.png`;
   } catch {
-    // 이미지가 없으면 새로 생성
     console.log(
       `Generating new ${marketType} market image for slot ${randomSlot}`
     );
@@ -99,19 +86,17 @@ async function getOrGenerateMarketImage(
     const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
 
     const generatedImagePath = await generateImage(randomPrompt);
-
     if (!generatedImagePath) {
       throw new Error(
         `Failed to generate ${marketType} market image for slot ${randomSlot}`
       );
     }
 
-    // 생성된 이미지를 해당 슬롯으로 이동
-    const sourceImagePath = path.join(publicDir, generatedImagePath);
-    await fs.rename(sourceImagePath, imagePath);
-    console.log(`Saved new ${marketType} market image to slot ${randomSlot}`);
-
-    return imageUrlPath;
+    return await saveGeneratedImage(
+      generatedImagePath,
+      `market/${marketType}`, // 하위 경로에 marketType 포함
+      `image${randomSlot}`
+    );
   }
 }
 

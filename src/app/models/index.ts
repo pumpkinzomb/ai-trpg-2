@@ -421,13 +421,26 @@ const dungeonSchema = new Schema(
         },
       },
     ],
+    status: {
+      type: String,
+      enum: ["active", "completed", "failed"],
+      default: "active",
+    },
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+    rewards: {
+      xp: Number,
+      gold: Number,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-interface IDungeonState extends Document {
+export interface IDungeonState extends Document {
   characterId: string;
   dungeonName: string;
   concept: string;
@@ -440,6 +453,9 @@ interface IDungeonState extends Document {
   createdAt: Date;
   updatedAt: Date;
   temporaryInventory: mongoose.Types.ObjectId[];
+  status: string;
+  completedAt?: Date | null;
+  rewards?: { xp: number; gold: number };
 }
 
 interface ISpell extends Document {

@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { generateImage } from "@/app/utils/aiDrawing";
+import { generateImage, saveGeneratedImage } from "@/app/utils/aiDrawing";
 import { LaborClient } from "./components/labor-client";
 import fs from "fs/promises";
 import path from "path";
@@ -55,28 +55,20 @@ function getRandomElement(arr: string[]): string {
 }
 
 async function getOrGenerateLaborImage(imageSlot?: number): Promise<string> {
-  const publicDir = path.join(process.cwd(), "public");
-  const uploadsDir = path.join(publicDir, "uploads");
-  const generatedImageDir = path.join(uploadsDir, "generated-image");
-  const laborDir = path.join(generatedImageDir, "labor");
-
-  for (const dir of [uploadsDir, generatedImageDir, laborDir]) {
-    try {
-      await fs.access(dir);
-    } catch {
-      await fs.mkdir(dir, { recursive: true });
-      console.log(`Created directory: ${dir}`);
-    }
-  }
-
   const randomSlot = imageSlot || Math.floor(Math.random() * MAX_LABOR_IMAGES);
-  const imagePath = path.join(laborDir, `image${randomSlot}.png`);
-  const imageUrlPath = `/uploads/generated-image/labor/image${randomSlot}.png`;
+  const expectedPath = path.join(
+    process.cwd(),
+    "public",
+    "uploads",
+    "generated-image",
+    "labor",
+    `image${randomSlot}.png`
+  );
 
   try {
-    await fs.access(imagePath);
+    await fs.access(expectedPath);
     console.log(`Using existing image at slot ${randomSlot}`);
-    return imageUrlPath;
+    return `/uploads/generated-image/labor/image${randomSlot}.png`;
   } catch {
     console.log(`Generating new image for slot ${randomSlot}`);
 
@@ -91,16 +83,15 @@ async function getOrGenerateLaborImage(imageSlot?: number): Promise<string> {
     console.log(`Using prompt: ${laborImagePrompt}`);
 
     const generatedImagePath = await generateImage(laborImagePrompt);
-
     if (!generatedImagePath) {
       throw new Error(`Failed to generate labor image for slot ${randomSlot}`);
     }
 
-    const sourceImagePath = path.join(publicDir, generatedImagePath);
-    await fs.rename(sourceImagePath, imagePath);
-    console.log(`Saved new image to slot ${randomSlot}`);
-
-    return imageUrlPath;
+    return await saveGeneratedImage(
+      generatedImagePath,
+      "labor",
+      `image${randomSlot}`
+    );
   }
 }
 

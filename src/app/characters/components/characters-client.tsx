@@ -4,24 +4,15 @@ import { useState } from "react";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import { Shield, Swords, Crown, Trash2, Plus, ArrowRight } from "lucide-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { Shield, Swords, Crown, Plus, ArrowRight } from "lucide-react";
+import { CharacterStatusSection } from "./CharacterStatusSection";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Character } from "@/app/types";
 import { CardContent, Card } from "@/components/ui/card";
+import { DeleteCharacterDialog } from "./DeleteCharacterDialog";
 
 interface PaginationData {
   total: number;
@@ -251,58 +242,15 @@ export function CharactersClient() {
                   {/* relative 추가 */}
                   {/* Top section */}
                   <div>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h2 className="text-lg font-semibold">
-                          {character.name}
-                        </h2>
-                        <p className="text-sm text-muted-foreground">
-                          {character.race} {character.class}
-                        </p>
-                      </div>
-                      <AlertDialog
-                        open={deletingCharacterId === character._id.toString()}
-                        onOpenChange={(open) => {
-                          if (!open) setDeletingCharacterId(null);
-                        }}
-                      >
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2"
-                            onClick={() =>
-                              setDeletingCharacterId(character._id.toString())
-                            }
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>
-                              정말 삭제하시겠습니까?
-                            </AlertDialogTitle>
-                            <AlertDialogDescription>
-                              이 작업은 되돌릴 수 없습니다. 캐릭터와 관련된 모든
-                              데이터가 영구적으로 삭제됩니다.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>취소</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() =>
-                                handleDelete(character._id.toString())
-                              }
-                              className="bg-red-600 hover:bg-red-700"
-                            >
-                              삭제
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                    <div className="flex items-center gap-2">
+                      <CharacterStatusSection
+                        characterId={character._id.toString()}
+                      />
+                      <DeleteCharacterDialog
+                        characterId={character._id.toString()}
+                        onDelete={() => mutate()}
+                      />
                     </div>
-
                     {/* Status bars */}
                     <div className="space-y-2 mt-2">
                       <div className="flex items-center gap-2">

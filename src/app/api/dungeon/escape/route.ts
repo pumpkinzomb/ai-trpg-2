@@ -2,7 +2,74 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Character, Dungeon, Item } from "@/app/models";
-import { TemporaryLoot } from "@/app/types";
+import mongoose from "mongoose";
+import { calculateFailureXP } from "@/app/utils/xpCalculator";
+import { handleDungeonItems } from "@/app/utils/dungeonItems";
+
+// 탈출 페널티/보상 계산 함수
+async function calculateEscapePenalties(dungeon: any, character: any) {
+  const results = {
+    goldPenalty: 0,
+    savedItems: [] as any[],
+    lostItems: [] as any[],
+    xpReward: 0,
+    preservedGold: 0,
+  };
+
+  // 1. 스테이지 진행도에 따른 보상/페널티 조정
+  const progressRatio = dungeon.currentStage / dungeon.maxStages;
+
+  // 2. 골드 페널티 계산 (진행도에 따라 감소)
+  const basePenaltyRate = Math.max(0.05, 0.25 - progressRatio * 0.15);
+  results.goldPenalty = Math.floor(character.gold * basePenaltyRate);
+
+  // 3. 던전에서 획득한 골드 중 보존되는 골드 계산
+  const unclaimedGold = dungeon.logs.reduce((total: number, log: any) => {
+    if (log.data?.rewards?.gold && !log.data.rewards.goldLooted) {
+      return total + log.data.rewards.gold;
+    }
+    return total;
+  }, 0);
+
+  // 진행도에 따른 골드 보존율 (50%~90%)
+  const goldPreservationRate = 0.5 + progressRatio * 0.4;
+  results.preservedGold = Math.floor(unclaimedGold * goldPreservationRate);
+
+  // 4. 아이템 보존/손실 계산 (진행도에 따라 보존 확률 증가)
+  const basePreservationChance = 0.3 + progressRatio * 0.4; // 30%~70% 기본 확률
+
+  for (const tempItem of dungeon.temporaryInventory) {
+    // 아이템 희귀도에 따른 추가 보존 확률
+    let preservationChance = basePreservationChance;
+    const item = await Item.findById(tempItem._id);
+
+    if (item) {
+      switch (item.rarity) {
+        case "rare":
+          preservationChance += 0.1;
+          break;
+        case "epic":
+          preservationChance += 0.2;
+          break;
+        case "legendary":
+          preservationChance += 0.3;
+          break;
+      }
+    }
+
+    if (Math.random() < preservationChance) {
+      results.savedItems.push(tempItem);
+    } else {
+      results.lostItems.push(tempItem);
+    }
+  }
+
+  // 5. 경험치 보상 계산 (실패보다 약간 높은 보상)
+  const baseFailureXP = calculateFailureXP(dungeon, character.level);
+  results.xpReward = Math.floor(baseFailureXP * (0.6 + progressRatio * 0.4));
+
+  return results;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,7 +87,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 던전 상태 확인
     const dungeon = await Dungeon.findById(dungeonId);
     if (!dungeon || !dungeon.active) {
       return NextResponse.json(
@@ -37,7 +103,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 캐릭터 정보 조회
+    // 탈출 불가능한 던전 체크
+    if (!dungeon.canEscape) {
+      return NextResponse.json(
+        { error: "This dungeon does not allow escape" },
+        { status: 400 }
+      );
+    }
+
     const character = await Character.findById(characterId);
     if (!character) {
       return NextResponse.json(
@@ -46,31 +119,87 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 탈출 페널티 계산
+    // 탈출 결과 계산
     const escapeResults = await calculateEscapePenalties(dungeon, character);
 
-    // 던전 상태 업데이트
-    dungeon.active = false;
-    await dungeon.save();
+    // 최종 골드 계산 (보존된 골드 - 페널티)
+    const finalGold = Math.max(
+      0,
+      escapeResults.preservedGold - escapeResults.goldPenalty
+    );
 
-    // 캐릭터 상태 업데이트 (페널티 적용)
-    character.gold = Math.max(0, character.gold - escapeResults.goldPenalty);
-    await character.save();
+    // 트랜잭션 시작
+    const dbSession = await mongoose.startSession();
+    try {
+      await dbSession.withTransaction(async () => {
+        // 던전 상태 업데이트
+        await Dungeon.findByIdAndUpdate(
+          dungeonId,
+          {
+            active: false,
+            status: "escaped",
+            completedAt: new Date(),
+            rewards: {
+              xp: escapeResults.xpReward,
+              gold: finalGold,
+            },
+            "logs.$[].data.rewards.goldLooted": true,
+          },
+          { session: dbSession }
+        );
 
-    // 선별된 아이템만 인벤토리로 이동
-    if (escapeResults.savedItems.length > 0) {
-      await updateCharacterInventory(character, escapeResults.savedItems);
+        // 캐릭터 상태 업데이트
+        await Character.findByIdAndUpdate(
+          characterId,
+          {
+            $inc: {
+              xp: escapeResults.xpReward,
+              gold: finalGold,
+            },
+          },
+          { session: dbSession }
+        );
+
+        // 인벤토리 처리
+        await handleDungeonItems(
+          dungeon,
+          character,
+          "escape",
+          dbSession,
+          escapeResults.savedItems
+        );
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: "Successfully escaped from dungeon",
+        rewards: {
+          xp: escapeResults.xpReward,
+          preservedGold: escapeResults.preservedGold,
+          finalGold: finalGold,
+        },
+        penalties: {
+          goldPenalty: escapeResults.goldPenalty,
+          lostItems: escapeResults.lostItems.length,
+        },
+        savedItems: escapeResults.savedItems.length,
+        progress: {
+          currentStage: dungeon.currentStage,
+          maxStages: dungeon.maxStages,
+          progressPercentage: Math.floor(
+            (dungeon.currentStage / dungeon.maxStages) * 100
+          ),
+        },
+      });
+    } catch (transactionError) {
+      console.error("Transaction error:", transactionError);
+      return NextResponse.json(
+        { error: "Failed to process dungeon escape" },
+        { status: 500 }
+      );
+    } finally {
+      await dbSession.endSession();
     }
-
-    return NextResponse.json({
-      success: true,
-      message: "Successfully escaped from dungeon",
-      penalties: {
-        lostGold: escapeResults.goldPenalty,
-        lostItems: escapeResults.lostItems,
-        savedItems: escapeResults.savedItems,
-      },
-    });
   } catch (error) {
     console.error("Dungeon escape error:", error);
     return NextResponse.json(
@@ -78,46 +207,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-// 탈출 페널티 계산 함수
-export async function calculateEscapePenalties(dungeon: any, character: any) {
-  const results = {
-    goldPenalty: 0,
-    savedItems: [] as TemporaryLoot[],
-    lostItems: [] as TemporaryLoot[],
-  };
-
-  // 1. 골드 페널티 계산 (현재 소지금의 20%)
-  results.goldPenalty = Math.floor(character.gold * 0.2);
-
-  // 2. 아이템 보존/손실 계산
-  for (const tempItem of dungeon.temporaryInventory) {
-    // 각 아이템에 대해 50% 확률로 보존
-    if (Math.random() < 0.5) {
-      results.savedItems.push(tempItem);
-    } else {
-      results.lostItems.push(tempItem);
-      // 손실된 아이템 삭제 또는 처리
-      await Item.findByIdAndDelete(tempItem.itemId);
-    }
-  }
-
-  return results;
-}
-
-// 캐릭터 인벤토리 업데이트 함수
-async function updateCharacterInventory(
-  character: any,
-  savedItems: TemporaryLoot[]
-) {
-  const itemUpdates = savedItems.map(async (tempItem) => {
-    const item = await Item.findById(tempItem.itemId);
-    if (item) {
-      item.ownerId = character._id;
-      await item.save();
-    }
-  });
-
-  await Promise.all(itemUpdates);
 }
