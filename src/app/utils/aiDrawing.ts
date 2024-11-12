@@ -2,6 +2,23 @@ import { HfInference } from "@huggingface/inference";
 import fs from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import OpenAI from "openai";
+
+interface CombatSceneInfo {
+  dungeonName: string; // 던전 이름
+  dungeonConcept: string; // 던전 컨셉
+  enemies: { name: string }[]; // 적 정보
+  character: {
+    race: string;
+    class: string;
+    equipment?: { weapon?: { name: string } };
+  }; // 캐릭터 정보
+  currentScene: string; // 현재 전투 장면 설명
+}
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
 
@@ -97,4 +114,71 @@ export async function saveGeneratedImage(
 
   // URL 경로 반환
   return `/uploads/generated-image/${destinationDir}/${filename}.png`;
+}
+
+export async function generateDungeonCombatPrompt(
+  sceneInfo: CombatSceneInfo
+): Promise<string | null> {
+  const SYSTEM_PROMPT = `
+You are a professional prompt engineer specializing in fantasy combat scene descriptions.
+Convert the given Korean combat scene information into a concise, vivid English prompt for image generation.
+Focus on visual elements, atmosphere, and dynamic action.
+Include specific details about:
+- Character's race and class visual characteristics
+- Weapon and combat stance
+- Enemy appearances and actions
+- Environment and lighting
+Keep the prompt under 75 words.
+Do not include style instructions as they will be added separately.
+Format: Single paragraph, descriptive phrase.`;
+
+  try {
+    // 캐릭터 정보를 D&D 스타일로 구성
+    const characterDescription = `${sceneInfo.character.race} ${
+      sceneInfo.character.class
+    }${
+      sceneInfo.character.equipment?.weapon?.name
+        ? ` wielding ${sceneInfo.character.equipment.weapon.name}`
+        : ""
+    }`;
+
+    // 적 설명을 하나의 문자열로 결합
+    const enemiesDescription = sceneInfo.enemies
+      .map((enemy) => enemy.name)
+      .join(", ");
+
+    const koreanPrompt = `
+던전: ${sceneInfo.dungeonName}
+던전 컨셉: ${sceneInfo.dungeonConcept}
+적: ${enemiesDescription}
+캐릭터: ${characterDescription}
+현재 장면: ${sceneInfo.currentScene}
+`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // gpt-4o-mini가 아닌 정확한 모델명 사용
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: koreanPrompt,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 150,
+    });
+
+    const englishPrompt = completion.choices[0].message.content?.trim();
+
+    if (!englishPrompt) {
+      throw new Error("Failed to generate English prompt");
+    }
+
+    console.log("Generated English prompt:", englishPrompt); // 디버깅용 로그 추가
+
+    return englishPrompt;
+  } catch (error) {
+    console.error("Error generating combat prompt:", error);
+    return null;
+  }
 }

@@ -409,22 +409,31 @@ export function DungeonClient() {
     if (!dungeonState || logIndex === 0) return;
 
     try {
-      const response = await fetch("/api/dungeon/delete-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dungeonId: dungeonState._id.toString(),
-          logIndex,
-        }),
-      });
+      const response = await fetch(
+        `/api/dungeon/${dungeonState._id}/logs?index=${logIndex}`,
+        {
+          method: "DELETE",
+        }
+      );
 
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Failed to delete log");
       }
 
-      const updatedDungeon = await response.json();
-      setDungeonState(updatedDungeon);
+      const { logs, temporaryInventory } = await response.json();
+
+      setDungeonState((prevState) => {
+        if (!prevState) return null;
+
+        return {
+          ...prevState,
+          logs,
+          temporaryInventory,
+          updatedAt: new Date(),
+        };
+      });
+
       setShowDeleteConfirm(null);
 
       toast({

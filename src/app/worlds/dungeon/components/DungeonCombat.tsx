@@ -67,6 +67,7 @@ interface DungeonCombatProps {
   onCombatStart: (value: boolean) => void;
   dungeonName: string;
   dungeonConcept: string;
+  currentScene: string;
 }
 
 interface CombatImage {
@@ -123,6 +124,7 @@ export default function DungeonCombat({
   dungeonName,
   dungeonConcept,
   onCombatStart,
+  currentScene,
 }: DungeonCombatProps) {
   // State 정의
   const [combatLog, setCombatLog] = useState<
@@ -471,24 +473,25 @@ export default function DungeonCombat({
     if (!character) return;
 
     setCombatImage({ url: null, loading: true });
-
-    const characterStyle = character.equipment.weapon?.name
-      ? `wielding ${character.equipment.weapon.name}`
-      : character.class.toLowerCase() === "monk"
-      ? "in martial arts combat stance"
-      : "fighting with bare hands";
-
-    const characterDescription = `${character.race} ${character.class} ${characterStyle}`;
-
-    const enemyDescription = enemies.map((e) => e.name).join(" and ");
-
-    const prompt = `A dynamic combat scene in a fantasy ${dungeonName}. 
-      A ${characterDescription} locked in intense battle against ${enemyDescription}. 
-      Scene inspired by ${dungeonConcept}.
-      Dramatic lighting, dynamic poses, epic fantasy atmosphere.
-      High detail, cinematic composition, dramatic angle.`;
-
     try {
+      const promptResponse = await fetch("/api/generate-combat-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          character: character,
+          enemies: enemies,
+          dungeonName,
+          dungeonConcept,
+          currentScene,
+        }),
+      });
+
+      if (!promptResponse.ok) {
+        throw new Error("Failed to generate prompt");
+      }
+      const { prompt } = await promptResponse.json();
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -497,7 +500,6 @@ export default function DungeonCombat({
 
       if (!response.ok) throw new Error("Failed to generate image");
       const data = await response.json();
-
       setCombatImage({
         url: data.imageUrl,
         loading: false,
