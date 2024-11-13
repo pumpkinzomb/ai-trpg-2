@@ -741,6 +741,7 @@ export function DungeonClient() {
                           onCombatStart={handleCombatStart}
                           dungeonConcept={dungeonState.concept}
                           dungeonName={dungeonState.dungeonName}
+                          currentScene={currentLog.description}
                         />
                       )}
                       {combatProcessing && (
