@@ -321,8 +321,10 @@ export function LaborClient({ laborImage }: LaborClientProps) {
 
         const rewardData = await rewardResponse.json();
 
-        await fetchCharacterStatus(selectedCharacter._id.toString());
-        await fetchCharacters();
+        await Promise.all([
+          fetchCharacterStatus(selectedCharacter._id.toString()),
+          fetchCharacters(),
+        ]);
 
         toast({
           title: "보상 수령 완료",
@@ -330,8 +332,6 @@ export function LaborClient({ laborImage }: LaborClientProps) {
             rewardData.levelUp ? " 레벨업!" : ""
           }`,
         });
-
-        router.push("/worlds/town");
       }
     } catch (error) {
       toast({
@@ -380,8 +380,10 @@ export function LaborClient({ laborImage }: LaborClientProps) {
           }),
         });
 
-        await fetchCharacterStatus(selectedCharacter._id.toString());
-        await fetchCharacters();
+        await Promise.all([
+          fetchCharacterStatus(selectedCharacter._id.toString()),
+          fetchCharacters(),
+        ]);
 
         toast({
           title: "보상 수령 및 노역 재시작",

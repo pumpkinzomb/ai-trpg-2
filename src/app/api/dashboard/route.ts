@@ -54,26 +54,31 @@ export async function GET(req: NextRequest) {
       })
     );
 
-    // 3. 최근 완료된 던전들
+    // 3. 최근 완료된 던전들 (첫 페이지)
     const recentDungeons = await Dungeon.find({
       characterId: { $in: characters.map((char) => char._id) },
       active: false,
     })
       .sort({ updatedAt: -1 })
       .limit(5)
-      .populate("characterId", "name")
+      .populate("characterId", "name profileImage")
       .select(
         "characterId dungeonName currentStage maxStages status completedAt rewards"
       )
       .lean();
 
-    console.log("recentDungeons", recentDungeons);
+    // 4. 전체 던전 수 계산 (페이지네이션 정보용)
+    const totalDungeons = await Dungeon.countDocuments({
+      characterId: { $in: characters.map((char) => char._id) },
+      active: false,
+    });
 
     return NextResponse.json({
       characters: characterStatuses,
       recentActivity: recentDungeons.map((dungeon) => ({
         _id: dungeon._id,
         characterName: (dungeon.characterId as any).name,
+        characterProfileImage: (dungeon.characterId as any).profileImage,
         dungeonName: dungeon.dungeonName,
         currentStage: dungeon.currentStage,
         maxStages: dungeon.maxStages,
@@ -81,6 +86,8 @@ export async function GET(req: NextRequest) {
         completedAt: dungeon.completedAt,
         rewards: dungeon.rewards,
       })),
+      hasMore: totalDungeons > 5,
+      total: totalDungeons,
     });
   } catch (error) {
     console.error("Dashboard error:", error);

@@ -5,7 +5,6 @@ import useSWR from "swr";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
 import {
   Map,
   Hammer,
@@ -17,13 +16,15 @@ import {
   ArrowRight,
   Heart,
   Flame,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { DungeonLogDialog } from "./DungeonLogDialog";
 import { LucideIcon } from "lucide-react";
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+import { Character } from "@/app/types";
+import CharacterSkeleton from "./CharacterSkeleton";
+import ActivitySkeleton from "./ActivitySkeleton";
 
 const getStatusIcon = (status: any) => {
   if (status.dungeon.isActive) return Map;
@@ -42,14 +43,6 @@ const getStatusColor = (status: any) => {
   if (status.labor.isActive) return "text-orange-500";
   return "text-green-500";
 };
-
-interface CharacterStatusBarProps {
-  label: string;
-  current: number;
-  max: number;
-  icon?: LucideIcon;
-  color?: string;
-}
 
 const CharacterStatusBar = ({
   label,
@@ -76,6 +69,7 @@ const CharacterStatusBar = ({
 interface DungeonActivity {
   _id: string;
   characterName: string;
+  characterProfileImage: string;
   dungeonName: string;
   currentStage: number;
   maxStages: number;
@@ -87,11 +81,50 @@ interface DungeonActivity {
   };
 }
 
+interface CharacterStatusBarProps {
+  label: string;
+  current: number;
+  max: number;
+  icon?: LucideIcon;
+  color?: string;
+}
+
+interface DashboardResponse {
+  characters: Character[];
+  recentActivity: DungeonActivity[];
+  hasMore: boolean;
+  total: number;
+}
+
+interface ActivitiesResponse {
+  activities: DungeonActivity[];
+  hasMore: boolean;
+  total: number;
+  currentPage: number;
+}
+
+const fetcher = (url: string) => fetch(url).then((res) => res.json());
+
 export function DashboardClient() {
-  const { data, error, isLoading } = useSWR<{
-    characters: any[];
-    recentActivity: DungeonActivity[];
-  }>("/api/dashboard", fetcher);
+  const [page, setPage] = useState(1);
+  const {
+    data: initialData,
+    error: initialError,
+    isLoading: initialLoading,
+  } = useSWR<DashboardResponse>("/api/dashboard", fetcher);
+
+  const {
+    data: additionalData,
+    error: additionalError,
+    isLoading: additionalLoading,
+  } = useSWR<ActivitiesResponse>(
+    initialData && page > 1
+      ? `/api/dashboard/activities?page=${page}&pageSize=5`
+      : null,
+    fetcher
+  );
+
+  console.log("additionalData", additionalData);
 
   const [selectedDungeon, setSelectedDungeon] = useState<{
     _id: string;
@@ -105,6 +138,15 @@ export function DashboardClient() {
       gold: number;
     };
   } | null>(null);
+
+  const allActivities = [
+    ...(initialData?.recentActivity || []),
+    ...(additionalData?.activities || []),
+  ];
+
+  const handleLoadMore = () => {
+    setPage((prev) => prev + 1);
+  };
 
   const handleDungeonClick = (activity: DungeonActivity) => {
     // active 상태의 던전은 로그 다이얼로그를 열지 않음
@@ -121,14 +163,40 @@ export function DashboardClient() {
     });
   };
 
-  if (isLoading)
+  if (initialLoading) {
     return (
       <div className="container mx-auto py-6 space-y-6">
-        <Card className="w-full h-48 animate-pulse" />
+        <Card>
+          <CardHeader>
+            <CardTitle>캐릭터 현황</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {[1, 2].map((i) => (
+              <CharacterSkeleton key={i} />
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <History className="w-5 h-5" />
+              최근 던전 활동
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <ActivitySkeleton key={i} />
+            ))}
+          </CardContent>
+        </Card>
       </div>
     );
+  }
 
-  if (error)
+  const hasMore = page === 1 ? initialData?.hasMore : additionalData?.hasMore;
+
+  if (initialError) {
     return (
       <div className="container mx-auto py-6">
         <Card className="p-6 text-center text-destructive">
@@ -136,26 +204,25 @@ export function DashboardClient() {
         </Card>
       </div>
     );
-
-  console.log("data?.recentActivity", data?.recentActivity);
+  }
 
   return (
     <div className="container mx-auto py-6 space-y-6">
-      {/* 캐릭터 목록 */}
+      {/* 캐릭터 목록 (기존 코드) */}
       <Card>
         <CardHeader>
           <CardTitle>캐릭터 현황</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {data?.characters.map((char: any) => {
+            {initialData?.characters.map((char: any) => {
               const StatusIcon = getStatusIcon(char.currentStatus);
               const statusColor = getStatusColor(char.currentStatus);
 
               return (
                 <Card key={char._id} className="p-4">
+                  {/* 기존 캐릭터 카드 내용... */}
                   <div className="flex items-start gap-6">
-                    {/* 캐릭터 프로필 */}
                     <div className="flex-shrink-0">
                       <div className="relative w-16 h-16">
                         <img
@@ -172,7 +239,6 @@ export function DashboardClient() {
                       </div>
                     </div>
 
-                    {/* 캐릭터 정보 및 상태 */}
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-3">
                         <div>
@@ -195,7 +261,6 @@ export function DashboardClient() {
                         </div>
                       </div>
 
-                      {/* 상태바 영역 */}
                       <div className="space-y-2">
                         <CharacterStatusBar
                           label="HP"
@@ -211,7 +276,6 @@ export function DashboardClient() {
                         />
                       </div>
 
-                      {/* 던전 진행 상태 */}
                       {char.activeDungeon && (
                         <div className="mt-3 flex items-center gap-2">
                           <Badge variant="secondary" className="text-xs">
@@ -242,9 +306,9 @@ export function DashboardClient() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {data?.recentActivity.map((activity, index) => (
+            {allActivities.map((activity) => (
               <div
-                key={index}
+                key={activity._id}
                 className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
                 onClick={() => handleDungeonClick(activity)}
               >
@@ -267,9 +331,16 @@ export function DashboardClient() {
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium truncate">
-                      {activity.characterName}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={activity.characterProfileImage}
+                        alt={activity.characterName}
+                        className="w-6 h-6 rounded-full object-cover"
+                      />
+                      <span className="font-medium truncate">
+                        {activity.characterName}
+                      </span>
+                    </div>
                     <span className="text-muted-foreground">·</span>
                     <span className="font-medium text-muted-foreground truncate">
                       {activity.dungeonName}
@@ -295,7 +366,7 @@ export function DashboardClient() {
                     size="sm"
                     className="text-xs"
                     onClick={(e) => {
-                      e.stopPropagation(); // 상위 onClick 이벤트와 충돌 방지
+                      e.stopPropagation();
                       handleDungeonClick(activity);
                     }}
                   >
@@ -305,17 +376,47 @@ export function DashboardClient() {
                 </div>
               </div>
             ))}
+
+            {/* 더보기 버튼 */}
+            {hasMore && (
+              <div className="flex justify-center pt-4">
+                <Button
+                  variant="outline"
+                  onClick={handleLoadMore}
+                  disabled={additionalLoading}
+                >
+                  {additionalLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      로딩중...
+                    </>
+                  ) : (
+                    "더 보기"
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {/* 추가 데이터 로딩 상태 */}
+            {additionalLoading && (
+              <div className="space-y-4">
+                {[1, 2].map((i) => (
+                  <ActivitySkeleton key={`additional-${i}`} />
+                ))}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
+
       <DungeonLogDialog
         open={!!selectedDungeon}
         onOpenChange={(open) => {
           if (!open) {
-            setSelectedDungeon(null); // 하나의 상태만 리셋
+            setSelectedDungeon(null);
           }
         }}
-        dungeonId={selectedDungeon?._id ?? null} // selectedDungeon에서 _id 참조
+        dungeonId={selectedDungeon?._id ?? null}
         initialData={selectedDungeon}
       />
     </div>
