@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
-import { DiceRoll } from "./DiceRoll";
+import { DiceRoll } from "@/components/DiceRoll";
 
 interface RewardResult {
   reward: number;

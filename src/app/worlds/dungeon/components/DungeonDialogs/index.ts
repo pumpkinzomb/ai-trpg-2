@@ -4,3 +4,4 @@ export * from "./EscapeResultsDialog";
 export * from "./LootWarningDialog";
 export * from "./CompleteConfirmDialog";
 export * from "./LogDetailDialog";
+export * from "./TrapDialog";

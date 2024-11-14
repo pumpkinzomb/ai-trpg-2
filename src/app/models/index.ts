@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 import { DungeonLog } from "../types";
+import { timeStamp } from "console";
 
 export interface IUser extends Document {
   _id: Schema.Types.ObjectId;
@@ -103,7 +104,6 @@ const characterSchema = new Schema(
     },
     profileImage: {
       type: String,
-      required: true,
     },
   },
   {
@@ -125,48 +125,6 @@ const spellSchema = new Schema(
       bonus: { type: Number },
     },
     description: { type: String, required: true },
-  },
-  {
-    timestamps: true,
-  }
-);
-
-// Combat Schema
-const combatSchema = new Schema(
-  {
-    characterId: {
-      type: Schema.Types.ObjectId,
-      required: true,
-      ref: "Character",
-    },
-    type: { type: String, enum: ["pve", "pvp"], required: true },
-    opponent: {
-      id: { type: Schema.Types.ObjectId, ref: "Character" },
-      name: { type: String, required: true },
-      stats: { type: Schema.Types.Mixed, required: true },
-    },
-    rounds: [
-      {
-        attacker: { type: String, required: true },
-        action: { type: String, required: true },
-        rolls: [
-          {
-            type: { type: String, required: true },
-            dice: { type: String, required: true },
-            result: { type: Number, required: true },
-            advantage: { type: Boolean },
-          },
-        ],
-        damage: { type: Number },
-        effects: [{ type: String }],
-      },
-    ],
-    result: { type: String, enum: ["victory", "defeat"], required: true },
-    rewards: {
-      experience: { type: Number },
-      gold: { type: Number },
-      items: [{ type: Schema.Types.ObjectId, ref: "Item" }],
-    },
   },
   {
     timestamps: true,
@@ -376,7 +334,7 @@ const dungeonSchema = new Schema(
           },
         },
       ],
-      default: [], // 기본값 설정
+      default: [],
     },
     logs: [
       {
@@ -406,10 +364,63 @@ const dungeonSchema = new Schema(
               ],
             },
           ],
-          requiredRoll: Number,
-          condition: String,
+          trap: {
+            type: {
+              type: String,
+              enum: [
+                "dexterity",
+                "strength",
+                "constitution",
+                "intelligence",
+                "wisdom",
+              ],
+            },
+            dc: Number,
+            outcomes: {
+              success: {
+                description: String,
+              },
+              failure: {
+                description: String,
+              },
+            },
+            resolved: Boolean,
+            resolution: {
+              success: Boolean,
+              roll: Number,
+              damage: Number,
+              description: String,
+            },
+          },
+          combat: {
+            resolved: Boolean,
+            resolution: {
+              victory: Boolean,
+              remainingHp: Number,
+              usedItems: [
+                {
+                  itemId: String,
+                  name: String,
+                  effect: {
+                    type: String,
+                    value: String,
+                  },
+                  timeStamp: Date,
+                },
+              ],
+              experienceGained: Number,
+              experienceBreakdown: {
+                baseXP: Number,
+                bonusXP: Number,
+                total: Number,
+              },
+            },
+          },
           rewards: {
-            goldLooted: Boolean,
+            goldLooted: {
+              type: Boolean,
+              default: false,
+            },
             gold: Number,
             xp: Number,
             items: [Schema.Types.Mixed],
@@ -472,34 +483,6 @@ interface ISpell extends Document {
   description: string;
 }
 
-interface ICombat extends Document {
-  characterId: mongoose.Types.ObjectId;
-  type: "pve" | "pvp";
-  opponent: {
-    id?: mongoose.Types.ObjectId;
-    name: string;
-    stats: any;
-  };
-  rounds: {
-    attacker: string;
-    action: string;
-    rolls: {
-      type: string;
-      dice: string;
-      result: number;
-      advantage?: boolean;
-    }[];
-    damage?: number;
-    effects?: string[];
-  }[];
-  result: "victory" | "defeat";
-  rewards?: {
-    experience: number;
-    gold: number;
-    items: mongoose.Types.ObjectId[];
-  };
-}
-
 interface IItem extends Document {
   name: string;
   type:
@@ -544,8 +527,6 @@ export const Character =
   mongoose.model<ICharacter>("Character", characterSchema);
 export const Spell =
   mongoose.models.Spell || mongoose.model<ISpell>("Spell", spellSchema);
-export const Combat =
-  mongoose.models.Combat || mongoose.model<ICombat>("Combat", combatSchema);
 export const Item =
   mongoose.models.Item || mongoose.model<IItem>("Item", itemSchema);
 export const Dungeon =

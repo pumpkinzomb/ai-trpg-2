@@ -225,6 +225,10 @@ export interface GenerationDungeonLog {
   type: "combat" | "trap" | "treasure" | "story" | "rest";
   description: string;
   image?: string;
+  effects?: {
+    hpChange: number;
+    stageProgress: boolean;
+  };
   data?: {
     enemies?: {
       name: string;
@@ -237,8 +241,45 @@ export interface GenerationDungeonLog {
         toHit: number;
       }[];
     }[];
-    requiredRoll?: number;
-    condition?: string;
+    trap?: {
+      type:
+        | "dexterity"
+        | "strength"
+        | "constitution"
+        | "intelligence"
+        | "wisdom";
+      dc: number;
+      outcomes: {
+        success: {
+          description: string;
+        };
+        failure: {
+          description: string;
+        };
+      };
+      resolved?: boolean;
+      resolution?: {
+        success: boolean;
+        roll: number;
+        damage: number;
+        description: string;
+      };
+    };
+    combat?: {
+      resolved?: boolean;
+      resolution?: {
+        victory: boolean;
+        remainingHp: number;
+        usedItems: UsedItem[];
+        experienceGained: number;
+        experienceBreakdown?: {
+          baseXP: number;
+          bonusXP: number;
+          total: number;
+        };
+      };
+    };
+
     rewards?: {
       gold: number;
       xp: number;
@@ -292,9 +333,22 @@ export interface EscapePenalties {
 
 export interface UsedItem {
   itemId: string;
+  name: string;
   timestamp: number;
   effect: {
     type: string;
     value: string;
+  };
+}
+
+export interface CombatResolution {
+  victory: boolean;
+  remainingHp: number;
+  usedItems: UsedItem[];
+  experienceGained: number;
+  experienceBreakdown?: {
+    baseXP: number;
+    bonusXP: number;
+    total: number;
   };
 }

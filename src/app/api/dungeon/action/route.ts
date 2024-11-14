@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
       "hpChange": number,
       "stageProgress": boolean
     },
-    "combat": {
+    "data": {
       "enemies": [{
         "name": "한글 몬스터 이름",
         "level": number,
@@ -199,30 +199,52 @@ export async function POST(req: NextRequest) {
           "damage": string,
           "toHit": number
         }]
-      }]
-    },
-    "rewards": {
-      "gold": number,
-      "goldLooted": boolean,
-      "xp": number,
-      "items": [{
-        "name": "한글 아이템 이름",
-        "type": "weapon" | "light-armor" | "medium-armor" | "heavy-armor" | "shield" | "accessory" | "consumable",
-        "rarity": "common" | "uncommon" | "rare" | "epic" | "legendary",
-        "stats": {
-          "damage": string,
-          "defense": number,
-          "effects": [{
-            "type": string,
-            "value": string
-          }]
-        },
-        "requiredLevel": number,
-        "value": number,
-        "description": "한글 아이템 설명"
-      }]
+      }],
+      "trap": {                           // Only for trap type
+        "type": "dexterity" | "strength" | "constitution" | "intelligence" | "wisdom",
+        "dc": number,
+        "outcomes": {
+          "success": {
+            "description": "성공시 상황 설명",
+          },
+          "failure": {
+            "description": "실패시 상황 설명",
+          }
+        }
+      },
+      "rewards": {
+        "gold": number,
+        "goldLooted": boolean,
+        "items": [{
+          "name": "한글 아이템 이름",
+          "type": "weapon" | "light-armor" | "medium-armor" | "heavy-armor" | "shield" | "accessory" | "consumable",
+          "rarity": "common" | "uncommon" | "rare" | "epic" | "legendary",
+          "stats": {
+            "damage": string,
+            "defense": number,
+            "effects": [{
+              "type": string,
+              "value": string
+            }]
+          },
+          "requiredLevel": number,
+          "value": number,
+          "description": "한글 아이템 설명"
+        }]
+      }
     }
   }
+  
+  For trap scenes, ensure:
+  1. The trap type matches the environmental context
+  2. DC is calculated as: base DC (${
+    difficulty.trapDifficulty.dcBase
+  }) + situational modifier (-2 to +2)
+  3. Damage on failure should use the specified damage dice: ${
+    difficulty.trapDifficulty.damageDice
+  }
+  4. Success should either avoid all damage or take reduced damage
+  5. Descriptions should be vivid and reflect the tension of the moment
   
   Return ONLY the JSON object with no additional text.
 `;
@@ -240,9 +262,46 @@ export async function POST(req: NextRequest) {
 
     const result = JSON.parse(completion.choices[0].message.content);
 
+    // trap 타입일 때만 trap 데이터 검증 및 보정
+    if (result.type === "trap" && !result.data?.trap) {
+      const trapDC = difficulty.trapDifficulty.dcBase;
+      // 기본 데미지 계산 (예: 1d4 + 레벨/2)
+      const trapDamage =
+        Math.floor(Math.random() * 4) + 1 + Math.floor(character.level / 2);
+
+      result.data = {
+        ...result.data,
+        trap: {
+          type: "dexterity", // 기본값으로 민첩 판정
+          dc: trapDC,
+          outcomes: {
+            success: {
+              description: "함정을 성공적으로 피했습니다.",
+            },
+            failure: {
+              description:
+                result.description || "함정에 걸려 피해를 입었습니다.",
+            },
+          },
+        },
+      };
+
+      if (!result.effects) {
+        result.effects = {
+          hpChange: -trapDamage,
+          stageProgress: false,
+        };
+      } else if (result.effects.hpChange === undefined) {
+        // effects는 있지만 hpChange가 없는 경우
+        result.effects.hpChange = -trapDamage;
+      }
+    }
+
+    console.log("check result", result);
+
     // 난이도 기반으로 결과 조정
-    if (result.combat?.enemies) {
-      result.combat.enemies = result.combat.enemies.map((enemy: any) => {
+    if (result.data?.enemies) {
+      result.data.enemies = result.data.enemies.map((enemy: any) => {
         const baseStats = generateEnemyStats(
           difficulty.combatDifficulty.enemyLevel,
           dungeon.currentStage === dungeon.maxStages - 1
@@ -255,21 +314,21 @@ export async function POST(req: NextRequest) {
     }
 
     // 보상 조정
-    if (result.rewards) {
-      result.rewards.gold = Math.floor(
-        result.rewards.gold * difficulty.rewards.goldMultiplier
+    if (result.data?.rewards) {
+      result.data.rewards.gold = Math.floor(
+        result.data.rewards.gold * difficulty.rewards.goldMultiplier
       );
-      result.rewards.xp = Math.floor(
-        result.rewards.xp * difficulty.rewards.xpMultiplier
+      result.data.rewards.xp = Math.floor(
+        result.data.rewards.xp * difficulty.rewards.xpMultiplier
       );
     }
 
     const image = await generateImage(result.imagePrompt);
 
     let rewardItems: Types.ObjectId[] = [];
-    if (result.rewards?.items?.length > 0) {
+    if (result.data?.rewards?.items?.length > 0) {
       const items = await Promise.all(
-        result.rewards.items.map(async (itemData: GenerationItem) => {
+        result.data.rewards.items.map(async (itemData: GenerationItem) => {
           const item = await Item.create({
             ...itemData,
             previousOwnerId: null,
@@ -280,26 +339,33 @@ export async function POST(req: NextRequest) {
           return item;
         })
       );
-      result.rewards.items = items;
+      result.data.rewards.items = items;
     }
 
     const newLog: GenerationDungeonLog = {
       type: result.type,
       description: result.description,
       image: image || undefined,
+      effects: result.effects || {
+        hpChange: -Math.floor(character.level * 1.5), // 캐릭터 레벨 기반 기본 데미지
+        stageProgress: false,
+      },
       data: {
-        enemies: result.combat?.enemies,
-        rewards: result.rewards
+        ...(result.type === "trap" ? { trap: result.data.trap } : {}),
+        enemies: result.data?.enemies,
+        rewards: result.data?.rewards
           ? {
-              gold: result.rewards.gold,
-              xp: result.rewards.xp,
-              items: result.rewards.items,
+              gold: result.data.rewards.gold,
+              xp: result.data.rewards.xp,
+              items: result.data.rewards.items,
               goldLooted: false,
             }
           : undefined,
       },
       timestamp: new Date(),
     };
+
+    console.log("check newLog", newLog);
 
     const newHP = Math.max(
       0,

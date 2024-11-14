@@ -53,8 +53,9 @@ export function TempleClient({ templeImage }: TempleClientProps) {
 
   // 치료 비용 계산 함수
   const calculateHealingCost = (character: Character) => {
-    const baseFromGold = Math.floor(character.gold / 5); // 소지금의 1/5
-    const minimumCost = 20; // 최소 비용
+    const baseFromGold =
+      character.level < 5 ? 0 : Math.floor(character.gold / 5); // 소지금의 1/5
+    const minimumCost = 10; // 최소 비용
 
     return Math.max(minimumCost, baseFromGold);
   };

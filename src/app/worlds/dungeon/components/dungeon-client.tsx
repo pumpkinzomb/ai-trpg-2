@@ -20,7 +20,8 @@ import { DungeonRewards } from "./DungeonRewards";
 import { DungeonLogs } from "./DungeonLogs";
 import { DungeonLoading } from "./DungeonLoading";
 import { CharacterSelect } from "./CharacterSelect";
-import DungeonFailure from "./DungeonFailure";
+import { TrapDiscoveryCard } from "./TrapDiscoveryCard";
+import CombatResult from "./CombatResult";
 import {
   ConfirmDeleteDialog,
   EscapeConfirmDialog,
@@ -28,6 +29,8 @@ import {
   LootWarningDialog,
   CompleteConfirmDialog,
   LogDetailDialog,
+  TrapDialog,
+  TrapResolution,
 } from "./DungeonDialogs";
 
 type LoadingState = {
@@ -98,6 +101,7 @@ export function DungeonClient() {
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [combatStarted, setCombatStarted] = useState(false);
   const [combatProcessing, setCombatProcessing] = useState(false);
+  const [showTrapDialog, setShowTrapDialog] = useState(false);
 
   useEffect(() => {
     fetchCharacters();
@@ -569,6 +573,65 @@ export function DungeonClient() {
     }
   };
 
+  const handleTrapRollEnd = async (result: TrapResolution) => {
+    if (!dungeonState || !selectedCharacter) return;
+
+    const currentLog = getCurrentLog();
+    if (!currentLog?.data?.trap) return;
+
+    try {
+      const response = await fetch("/api/dungeon/trap-result", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dungeonId: dungeonState._id.toString(),
+          logId: currentLog._id.toString(),
+          result: {
+            success: result.success,
+            roll: result.roll,
+            damage: result.damage,
+            description: result.description,
+          },
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to process trap result");
+      const data = await response.json();
+      setDungeonState(data.dungeon);
+
+      toast({
+        title: result.success ? "함정 회피 성공!" : "함정 회피 실패",
+        description: result.description,
+        variant: result.success ? "default" : "destructive",
+      });
+
+      // 트랩 처리가 완료되면 다이얼로그 닫기
+      setShowTrapDialog(false);
+    } catch (error) {
+      console.error("Failed to process trap result:", error);
+      toast({
+        variant: "destructive",
+        title: "오류 발생",
+        description: "함정 결과를 처리하는데 실패했습니다.",
+      });
+    }
+  };
+
+  // 능력치 수정치 계산 함수 추가
+  const getAbilityModifier = (character: Character, abilityType: string) => {
+    const abilityScores = {
+      strength: character.stats.strength,
+      dexterity: character.stats.dexterity,
+      constitution: character.stats.constitution,
+      intelligence: character.stats.intelligence,
+      wisdom: character.stats.wisdom,
+    };
+
+    const score =
+      abilityScores[abilityType as keyof typeof abilityScores] || 10;
+    return Math.floor((score - 10) / 2);
+  };
+
   // 캐릭터가 없는 경우
   if (!loadingState.init && characters.length === 0) {
     return (
@@ -622,11 +685,6 @@ export function DungeonClient() {
         getCharacterStatusText={getCharacterStatusText}
       />
     );
-  }
-
-  // 던전 실패 상태
-  if (dungeonState?.playerHP <= 0) {
-    return <DungeonFailure onMoveToTemple={handleDungeonFail} />;
   }
 
   // 현재 활성화된 로그를 가져오는 함수
@@ -716,6 +774,7 @@ export function DungeonClient() {
                 <CardContent>
                   {currentLog && (
                     <div className="space-y-4">
+                      {/* 기본 설명과 이미지는 항상 표시 */}
                       {!combatStarted && (
                         <>
                           <p className="text-lg">{currentLog.description}</p>
@@ -730,50 +789,97 @@ export function DungeonClient() {
                           )}
                         </>
                       )}
-                      {/* 전투 상태 */}
-                      {isInCombat(currentLog) && currentLog.data?.enemies && (
-                        <DungeonCombat
-                          enemies={currentLog.data.enemies}
-                          playerHp={dungeonState.playerHP}
-                          maxPlayerHp={selectedCharacter?.hp.max || 0}
-                          character={selectedCharacter || undefined}
-                          onCombatEnd={handleCombatEnd}
-                          onCombatStart={handleCombatStart}
-                          dungeonConcept={dungeonState.concept}
-                          dungeonName={dungeonState.dungeonName}
-                          currentScene={currentLog.description}
-                        />
-                      )}
-                      {combatProcessing && (
-                        <Card className="mt-4">
-                          <CardContent className="p-4">
-                            <div className="flex items-center justify-center gap-2">
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              <p>전투 결과 처리 중...</p>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )}
 
-                      {/* 보상 표시 - gold나 items가 있을 때만 표시 */}
-                      {currentLog &&
-                        rewards &&
-                        (rewards.gold > 0 || rewards.items?.length > 0) &&
-                        (canLootRewards(currentLog) ? (
-                          <DungeonRewards
-                            rewards={rewards}
-                            logId={currentLog._id.toString()}
-                            temporaryInventory={dungeonState.temporaryInventory}
-                            onLootGold={handleLootGold}
-                            onLootItem={handleLoot}
-                          />
-                        ) : isInCombat(currentLog) ? (
-                          <Card className="bg-muted p-4">
-                            <p className="text-center text-muted-foreground">
-                              전투를 완료한 후에 보상을 획득할 수 있습니다.
-                            </p>
-                          </Card>
-                        ) : null)}
+                      {/* Trap 처리 - 해결되지 않은 트랩이 있을 때만 표시 */}
+                      {currentLog.data?.trap &&
+                        !currentLog.data.trap.resolved && (
+                          <>
+                            <TrapDiscoveryCard
+                              onRollDice={() => setShowTrapDialog(true)}
+                            />
+                            <TrapDialog
+                              open={showTrapDialog}
+                              onOpenChange={setShowTrapDialog}
+                              trap={currentLog.data.trap}
+                              effects={
+                                currentLog.effects || {
+                                  hpChange: -Math.floor(
+                                    selectedCharacter!.level * 1.5
+                                  ), // 캐릭터 레벨 기반 기본 데미지
+                                  stageProgress: false,
+                                }
+                              }
+                              abilityModifier={getAbilityModifier(
+                                selectedCharacter!,
+                                currentLog.data.trap.type
+                              )}
+                              onResolutionComplete={handleTrapRollEnd}
+                            />
+                          </>
+                        )}
+
+                      {/* 트랩이 해결되었거나 없을 때만 전투/보상 표시 */}
+                      {(!currentLog.data?.trap ||
+                        currentLog.data.trap.resolved) && (
+                        <>
+                          {/* 전투 상태 */}
+                          {isInCombat(currentLog) &&
+                            currentLog.data?.enemies && (
+                              <DungeonCombat
+                                enemies={currentLog.data.enemies}
+                                playerHp={dungeonState.playerHP}
+                                maxPlayerHp={selectedCharacter?.hp.max || 0}
+                                character={selectedCharacter || undefined}
+                                onCombatEnd={handleCombatEnd}
+                                onCombatStart={handleCombatStart}
+                                dungeonConcept={dungeonState.concept}
+                                dungeonName={dungeonState.dungeonName}
+                                currentScene={currentLog.description}
+                              />
+                            )}
+
+                          {/* 전투 결과 표시 */}
+                          {currentLog.data?.combat?.resolved && (
+                            <CombatResult
+                              log={currentLog}
+                              maxHp={selectedCharacter?.hp.max || 0}
+                            />
+                          )}
+
+                          {combatProcessing && (
+                            <Card className="mt-4">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  <p>전투 결과 처리 중...</p>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          )}
+
+                          {/* 보상 표시 */}
+                          {currentLog &&
+                            rewards &&
+                            (rewards.gold > 0 || rewards.items?.length > 0) &&
+                            (canLootRewards(currentLog) ? (
+                              <DungeonRewards
+                                rewards={rewards}
+                                logId={currentLog._id.toString()}
+                                temporaryInventory={
+                                  dungeonState.temporaryInventory
+                                }
+                                onLootGold={handleLootGold}
+                                onLootItem={handleLoot}
+                              />
+                            ) : isInCombat(currentLog) ? (
+                              <Card className="bg-muted p-4">
+                                <p className="text-center text-muted-foreground">
+                                  전투를 완료한 후에 보상을 획득할 수 있습니다.
+                                </p>
+                              </Card>
+                            ) : null)}
+                        </>
+                      )}
                     </div>
                   )}
                 </CardContent>

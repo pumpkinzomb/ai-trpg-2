@@ -445,6 +445,7 @@ export default function DungeonCombat({
           ...prev,
           {
             itemId,
+            name: item.name,
             timestamp: Date.now(),
             effect: item.stats.effects[0],
           },
@@ -723,7 +724,9 @@ export default function DungeonCombat({
 
         showAttackEffect("damage", criticalDamage, "player");
         addCombatLog(
-          `치명타! ${enemy.name}의 ${attack.name} 공격이 플레이어에게 ${criticalDamage}의 치명적인 피해를 입혔습니다!`,
+          `치명타! ${enemy.name}의 ${
+            attack.name || "일반"
+          } 공격이 플레이어에게 ${criticalDamage}의 치명적인 피해를 입혔습니다!`,
           "critical"
         );
 
@@ -737,7 +740,9 @@ export default function DungeonCombat({
 
         showAttackEffect("damage", damage, "player");
         addCombatLog(
-          `${enemy.name}의 ${attack.name} 공격이 플레이어에게 ${damage}의 피해를 입혔습니다.`,
+          `${enemy.name}의 ${
+            attack.name || "일반"
+          } 공격이 플레이어에게 ${damage}의 피해를 입혔습니다.`,
           "normal"
         );
 
@@ -747,7 +752,9 @@ export default function DungeonCombat({
       } else {
         showAttackEffect("miss", 0, "player");
         addCombatLog(
-          `${enemy.name}의 ${attack.name} 공격이 빗나갔습니다. (${toHit} vs AC ${playerAC})`,
+          `${enemy.name}의 ${
+            attack.name || "일반"
+          } 공격이 빗나갔습니다. (${toHit} vs AC ${playerAC})`,
           "miss"
         );
       }
@@ -773,40 +780,7 @@ export default function DungeonCombat({
     setCombatStarted(true);
     onCombatStart(true);
 
-    // 이미지 생성 시도
-    if (character) {
-      setCombatImage({ url: null, loading: true });
-
-      const enemyDescription = enemies
-        .map((e) => `${e.name} (Level ${e.level})`)
-        .join(" and ");
-
-      const prompt = `
-        A dramatic combat scene between a ${character.race} ${character.class} 
-        facing off against ${enemyDescription} in ${dungeonName || "a dungeon"}.
-        ${dungeonConcept || ""} 
-        Action-packed fantasy battle scene with dynamic poses and dramatic lighting.
-      `;
-
-      try {
-        const response = await fetch("/api/generate-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-
-        if (!response.ok) throw new Error("Failed to generate image");
-        const data = await response.json();
-
-        setCombatImage({
-          url: data.imageUrl,
-          loading: false,
-        });
-      } catch (error) {
-        console.error("Failed to generate combat image:", error);
-        setCombatImage({ url: null, loading: false });
-      }
-    }
+    await generateCombatImage();
 
     // 전투 초기화
     const initiativeRolls: InitiativeRoll[] = [];
@@ -848,13 +822,6 @@ export default function DungeonCombat({
       "system"
     );
   }, [character, enemies, dungeonName, dungeonConcept, rollDice, addCombatLog]);
-
-  // 1. useEffect 훅들
-  useEffect(() => {
-    if (combatStarted && !combatImage.url && !combatImage.loading) {
-      generateCombatImage();
-    }
-  }, [combatStarted]);
 
   useEffect(() => {
     if (combatStarted && turnOrder.length > 0 && currentRound === 1) {

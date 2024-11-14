@@ -108,7 +108,7 @@ export function LogDetailDialog({
                 <DungeonRewards
                   rewards={log.data.rewards}
                   logId={log._id.toString()}
-                  dungeonState={dungeonState}
+                  temporaryInventory={dungeonState.temporaryInventory}
                   onLootGold={onLootGold}
                   onLootItem={onLootItem}
                   disabled={isDisabled}

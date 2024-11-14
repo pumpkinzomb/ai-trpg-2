@@ -31,6 +31,61 @@ export function DungeonLogs({
     return totalEnemyHp > 0;
   };
 
+  const getLogIcon = (log: DungeonLog) => {
+    switch (log.type) {
+      case "combat":
+        return "⚔️ ";
+      case "trap":
+        return "🎯 ";
+      default:
+        return "👣 ";
+    }
+  };
+
+  const getCombatResultDisplay = (log: DungeonLog) => {
+    if (!log.data?.combat?.resolved || !log.data.combat.resolution) return null;
+    const resolution = log.data.combat.resolution;
+
+    return (
+      <div className="mt-1 text-xs">
+        {resolution?.victory ? (
+          <span className="text-green-500 flex items-center gap-1">
+            <Check className="h-3 w-3" />
+            전투 승리 (획득 경험치: {resolution.experienceGained})
+          </span>
+        ) : (
+          <span className="text-red-500">전투 패배</span>
+        )}
+        {resolution?.usedItems.length > 0 && (
+          <span className="text-muted-foreground ml-2">
+            · 사용한 아이템: {resolution.usedItems.length}개
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const getTrapResultDisplay = (log: DungeonLog) => {
+    if (!log.data?.trap?.resolved || !log.data.trap.resolution) return null;
+    const resolution = log.data.trap.resolution;
+
+    return (
+      <div className="mt-1 text-xs">
+        {resolution?.success ? (
+          <span className="text-green-500 flex items-center gap-1">
+            <Check className="h-3 w-3" />
+            함정 회피 성공 (굴림: {resolution.roll})
+          </span>
+        ) : (
+          <span className="text-red-500 flex items-center gap-1">
+            <span>❌</span>
+            함정 판정 실패 (굴림: {resolution.roll}) - 피해: {resolution.damage}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -56,11 +111,16 @@ export function DungeonLogs({
                   onClick={() => onLogClick(log)}
                 >
                   <p className="text-sm pr-8">
-                    {log.type === "combat" ? "⚔️ " : "👣 "}
+                    {getLogIcon(log)}
                     {log.description.length > 100
                       ? `${log.description.substring(0, 100)}...`
                       : log.description}
                   </p>
+
+                  {/* 전투/함정 결과 표시 */}
+                  {getCombatResultDisplay(log)}
+                  {getTrapResultDisplay(log)}
+                  {/* 보상 표시 */}
                   {log.data?.rewards && (
                     <div className="mt-2 text-xs text-muted-foreground flex items-center space-x-4">
                       {(log.data.rewards.gold > 0 ||
