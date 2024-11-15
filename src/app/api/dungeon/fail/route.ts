@@ -50,6 +50,8 @@ export async function POST(req: NextRequest) {
     }, 0);
     const preservedGold = Math.floor(unclaimedGold * 0.2); // 실패 시 20%만 보존
 
+    console.log("failureXP", failureXP);
+
     // 트랜잭션 시작
     const dbSession = await mongoose.startSession();
     try {
@@ -75,7 +77,7 @@ export async function POST(req: NextRequest) {
           characterId,
           {
             $inc: {
-              xp: failureXP,
+              experience: failureXP,
               gold: preservedGold,
             },
             "hp.current": 0, // HP를 0으로 설정

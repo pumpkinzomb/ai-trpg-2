@@ -21,7 +21,16 @@ export async function GET(req: NextRequest) {
     }
 
     // 캐릭터 확인
-    const character = await Character.findById(characterId);
+    const [character, activeDungeon] = await Promise.all([
+      Character.findById(characterId).select(
+        "name level class race hp profileImage inventory experience gold"
+      ),
+      Dungeon.findOne({
+        characterId,
+        active: true,
+      }),
+    ]);
+
     if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
@@ -29,20 +38,14 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 활성화된 던전 찾기
-    const activeDungeon = await Dungeon.findOne({
-      characterId,
-      active: true,
-    }).populate([
-      {
-        path: "characterId",
-        select: "name level class race hp profileImage",
-      },
-    ]);
-
     return NextResponse.json({
       success: true,
-      dungeon: activeDungeon,
+      dungeon: activeDungeon
+        ? {
+            ...activeDungeon.toObject(),
+            character,
+          }
+        : null,
     });
   } catch (error) {
     console.error("Active dungeon check error:", error);

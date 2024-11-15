@@ -62,38 +62,47 @@ export async function POST(req: NextRequest) {
     }
 
     // 던전 상태 업데이트
-    const updatedDungeon = await Dungeon.findOneAndUpdate(
-      {
-        _id: dungeonId,
-        "logs._id": logId,
-      },
-      {
-        $set: {
-          "logs.$.data.rewards.goldLooted": true,
-          "logs.$.data.rewards.gold": 0,
+    const [updatedDungeon, character] = await Promise.all([
+      Dungeon.findOneAndUpdate(
+        {
+          _id: dungeonId,
+          "logs._id": logId,
         },
-      },
-      {
-        new: true,
-        session: mongoSession,
-        runValidators: true,
-      }
-    ).populate("characterId");
-
-    // 캐릭터 골드 업데이트
-    const character = updatedDungeon.characterId;
-    if (character) {
-      await Character.findByIdAndUpdate(
-        character._id,
+        {
+          $set: {
+            "logs.$.data.rewards.goldLooted": true,
+            "logs.$.data.rewards.gold": 0,
+          },
+        },
+        {
+          new: true,
+          session: mongoSession,
+          runValidators: true,
+        }
+      ),
+      Character.findByIdAndUpdate(
+        dungeon.characterId,
         {
           $inc: { gold: goldAmount },
         },
-        { new: true, session: mongoSession }
-      );
+        {
+          new: true,
+          session: mongoSession,
+          select:
+            "name level class race hp profileImage inventory experience gold",
+        }
+      ),
+    ]);
+
+    if (!updatedDungeon || !character) {
+      throw new Error("Failed to update dungeon or character");
     }
 
     await mongoSession.commitTransaction();
-    return NextResponse.json(updatedDungeon);
+    return NextResponse.json({
+      ...updatedDungeon.toObject(),
+      character,
+    });
   } catch (error) {
     await mongoSession.abortTransaction();
     console.error("Loot gold error:", error);

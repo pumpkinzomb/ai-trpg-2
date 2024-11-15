@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import { ICharacter } from "../models";
 
 export interface Character {
   _id: Types.ObjectId;
@@ -304,6 +305,7 @@ export interface TemporaryLoot {
 export interface DungeonState {
   _id: string;
   characterId: string;
+  character?: Character;
   dungeonName: string;
   concept: string;
   currentStage: number;

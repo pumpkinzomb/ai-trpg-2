@@ -38,6 +38,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const character = await Character.findById(dungeon.characterId).select(
+      "name level class race hp profileImage inventory experience gold"
+    );
+
+    if (!character) {
+      return NextResponse.json(
+        { error: "Character not found" },
+        { status: 404 }
+      );
+    }
+
     // 해당 로그 찾기
     const logIndex = dungeon.logs.findIndex(
       (log: DungeonLog) => log._id.toString() === logId
@@ -74,17 +85,24 @@ export async function POST(req: NextRequest) {
     // 로그 업데이트
     dungeon.logs[logIndex] = currentLog;
 
-    await dungeon.save();
-
-    // 최종 던전 상태 조회
-    const updatedDungeon = await Dungeon.findById(dungeonId)
-      .populate("characterId")
-      .populate("temporaryInventory.itemId");
+    const updatedDungeon = await Dungeon.findByIdAndUpdate(
+      dungeonId,
+      {
+        $set: {
+          playerHP: newHP,
+          logs: dungeon.logs,
+        },
+      },
+      { new: true }
+    );
 
     return NextResponse.json({
       success: true,
       message: success ? "함정 회피 성공" : "함정 피해 발생",
-      dungeon: updatedDungeon,
+      dungeon: {
+        ...updatedDungeon.toObject(),
+        character,
+      },
       trapResult: {
         success,
         roll,

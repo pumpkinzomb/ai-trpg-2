@@ -1,3 +1,5 @@
+import { IDungeonState } from "../models";
+
 export function getBaseXPForLevel(level: number): number {
   // 레벨별 기본 경험치 계산
   // 예시: 기본값 100에서 레벨당 15% 증가
@@ -6,7 +8,7 @@ export function getBaseXPForLevel(level: number): number {
 
 // 던전 실패 시 경험치 계산 함수
 export function calculateFailureXP(
-  dungeon: any,
+  dungeon: IDungeonState,
   characterLevel: number
 ): number {
   // 레벨별 기본 스테이지 경험치
@@ -15,37 +17,28 @@ export function calculateFailureXP(
   // 현재까지 진행한 스테이지 수
   const completedStages = dungeon.currentStage;
 
-  // 던전 레벨과 캐릭터 레벨 차이에 따른 보정
-  const levelDiff = Math.max(
-    -5,
-    Math.min(5, dungeon.recommendedLevel - characterLevel)
-  );
-
-  // 레벨 차이에 따른 경험치 보정
-  // 높은 레벨 던전은 더 많은 경험치, 낮은 레벨 던전은 적은 경험치
-  let levelMultiplier = 1;
-  if (levelDiff > 0) {
-    // 높은 레벨 던전
-    levelMultiplier = 1 + levelDiff * 0.2; // 레벨당 20% 증가
-  } else if (levelDiff < 0) {
-    // 낮은 레벨 던전
-    levelMultiplier = Math.max(0.1, 1 + levelDiff * 0.15); // 최소 10%까지 감소
-  }
+  // 던전 난이도에 따른 보정
+  // recommendedLevel이 없으므로, 스테이지 수에 기반한 난이도 보정으로 변경
+  const difficultyMultiplier = Math.min(1.5, 1 + dungeon.maxStages / 10); // 최대 50% 보너스
 
   // 기본 경험치 계산
-  let xp = baseXPPerStage * completedStages * levelMultiplier;
+  let xp = baseXPPerStage * completedStages * difficultyMultiplier;
 
   // 보스 직전까지 진행했다면 추가 보너스
   if (completedStages === dungeon.maxStages - 1) {
     xp *= 1.5; // 50% 추가 보너스
   }
 
+  // 최소 경험치 보장 (적어도 기본 경험치의 10%는 받도록)
+  const minimumXP = Math.floor(baseXPPerStage * 0.1);
+  xp = Math.max(minimumXP, Math.floor(xp));
+
   return Math.floor(xp);
 }
 
 // 던전 완료 시 경험치 계산 함수
 export function calculateCompletionXP(
-  dungeon: any,
+  dungeon: IDungeonState,
   characterLevel: number
 ): number {
   // 레벨별 기본 경험치
@@ -54,34 +47,29 @@ export function calculateCompletionXP(
   // 스테이지 수에 따른 보너스
   const stageBonus = dungeon.maxStages * (baseXP * 0.2); // 스테이지당 기본 경험치의 20%
 
-  // 던전 레벨과 캐릭터 레벨 차이에 따른 보정
-  const levelDiff = Math.max(
-    -5,
-    Math.min(5, dungeon.recommendedLevel - characterLevel)
-  );
+  // 던전 난이도 승수 (최대 스테이지 수 기반)
+  // 더 긴 던전 = 더 어려운 던전으로 간주
+  const difficultyMultiplier = Math.min(2.0, 1 + dungeon.maxStages / 8); // 최대 100% 보너스
 
-  // 레벨 차이에 따른 경험치 보정
-  let levelMultiplier = 1;
-  if (levelDiff > 0) {
-    // 높은 레벨 던전
-    levelMultiplier = 1 + levelDiff * 0.2; // 레벨당 20% 증가
-  } else if (levelDiff < 0) {
-    // 낮은 레벨 던전
-    levelMultiplier = Math.max(0.1, 1 + levelDiff * 0.15); // 최소 10%까지 감소
-  }
+  // 보스 스테이지 클리어 보너스
+  const bossBonus = baseXP * 0.5; // 보스 처치 보너스 50%
 
-  // 총 경험치에 던전 난이도 보너스 추가
-  const difficultyBonus =
-    dungeon.recommendedLevel > characterLevel
-      ? baseXP * 0.1 // 높은 레벨 던전 추가 보너스
-      : 0;
+  // 진행도 보너스 (100% 완료 시에만)
+  const completionBonus = baseXP * 0.3; // 완료 보너스 30%
 
-  return Math.floor((baseXP + stageBonus + difficultyBonus) * levelMultiplier);
-}
+  // 총 경험치 계산
+  const totalXP =
+    (baseXP + stageBonus + bossBonus + completionBonus) * difficultyMultiplier;
 
-// 레벨업에 필요한 경험치 계산 (참고용)
-export function getRequiredXPForLevel(level: number): number {
-  // 레벨별 필요 경험치 계산
-  // 예시: 기본값 1000에서 레벨당 50% 증가
-  return Math.floor(1000 * Math.pow(1.5, level - 1));
+  // 디버깅을 위한 계산 과정 로깅
+  console.log("Completion XP Calculation:", {
+    baseXP,
+    stageBonus,
+    difficultyMultiplier,
+    bossBonus,
+    completionBonus,
+    totalXP: Math.floor(totalXP),
+  });
+
+  return Math.floor(totalXP);
 }

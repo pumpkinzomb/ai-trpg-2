@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DungeonCombat from "./DungeonCombat";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, Loader2 } from "lucide-react";
+import { UserPlus, Loader2, SkullIcon, Swords } from "lucide-react";
 import { DungeonHeader } from "./DungeonHeader";
 import { DungeonActionInput } from "./DungeonActionInput";
 import { DungeonRewards } from "./DungeonRewards";
@@ -21,7 +21,7 @@ import { DungeonLogs } from "./DungeonLogs";
 import { DungeonLoading } from "./DungeonLoading";
 import { CharacterSelect } from "./CharacterSelect";
 import { TrapDiscoveryCard } from "./TrapDiscoveryCard";
-import CombatResult from "./CombatResult";
+import StatusResult from "./StatusResult";
 import {
   ConfirmDeleteDialog,
   EscapeConfirmDialog,
@@ -32,6 +32,7 @@ import {
   TrapDialog,
   TrapResolution,
 } from "./DungeonDialogs";
+import { CharacterDeathCard } from "./CharacterDeathCard";
 
 type LoadingState = {
   init: boolean; // 초기 캐릭터 로딩
@@ -99,9 +100,20 @@ export function DungeonClient() {
   );
   const [showEscapeResults, setShowEscapeResults] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
-  const [combatStarted, setCombatStarted] = useState(false);
   const [combatProcessing, setCombatProcessing] = useState(false);
   const [showTrapDialog, setShowTrapDialog] = useState(false);
+  const [showCombat, setShowCombat] = useState(false);
+  const [CharacterDead, setCharacterDead] = useState<{
+    dead: boolean;
+    cause?: "trap" | "combat";
+  }>({ dead: false });
+  const [initiativeOrder, setInitiativeOrder] = useState<
+    Array<{
+      name: string;
+      isPlayer: boolean;
+      enemyIndex?: number;
+    }>
+  >([]);
 
   useEffect(() => {
     fetchCharacters();
@@ -195,6 +207,13 @@ export function DungeonClient() {
       // 활성화된 던전이 있으면 해당 던전을 로드
       if (activeData.dungeon) {
         setDungeonState(activeData.dungeon);
+        if (activeData.dungeon.playerHP <= 0) {
+          setCharacterDead({
+            dead: true,
+            cause: determineDeathCause(activeData.dungeon.logs),
+          });
+        }
+        return;
         return;
       }
 
@@ -272,6 +291,26 @@ export function DungeonClient() {
     } finally {
       setLoadingState((prev) => ({ ...prev, action: false }));
     }
+  };
+
+  const determineDeathCause = (logs: DungeonLog[]): "combat" | "trap" => {
+    // 마지막 로그부터 역순으로 확인
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const log = logs[i];
+
+      // 전투 로그 확인
+      if (log.data?.combat?.resolved && !log.data.combat.resolution?.victory) {
+        return "combat";
+      }
+
+      // 함정 로그 확인
+      if (log.data?.trap?.resolved && !log.data.trap.resolution?.success) {
+        return "trap";
+      }
+    }
+
+    // 기본값은 전투로 설정
+    return "combat";
   };
 
   // 루팅 가능한 아이템이나 골드가 있는지 확인하는 함수
@@ -553,14 +592,21 @@ export function DungeonClient() {
       // 던전 상태 업데이트
       setDungeonState(data.dungeon);
 
-      // 승리시에만 메시지 표시
-      if (result.victory) {
+      if (!result.victory) {
+        setCharacterDead({ dead: true, cause: "combat" });
+        toast({
+          variant: "destructive",
+          title: "치명상",
+          description: "전투에서 치명상을 입었습니다.",
+        });
+      } else {
         toast({
           title: "전투 승리",
           description: "전투에서 승리했습니다!",
         });
-        setCombatStarted(false);
       }
+
+      setShowCombat(false);
     } catch (error) {
       console.error("Failed to process combat result:", error);
       toast({
@@ -604,6 +650,10 @@ export function DungeonClient() {
         description: result.description,
         variant: result.success ? "default" : "destructive",
       });
+
+      if (!result.success && dungeonState.playerHP - result.damage <= 0) {
+        setCharacterDead({ dead: true, cause: "trap" });
+      }
 
       // 트랩 처리가 완료되면 다이얼로그 닫기
       setShowTrapDialog(false);
@@ -692,10 +742,6 @@ export function DungeonClient() {
     return dungeonState?.logs[dungeonState.logs.length - 1];
   };
 
-  const handleCombatStart = (value: boolean) => {
-    setCombatStarted(value);
-  };
-
   const isItemLootedFromSpecificLog = (
     itemId: string,
     logId: string,
@@ -716,6 +762,58 @@ export function DungeonClient() {
       0
     );
     return totalEnemyHp > 0;
+  };
+
+  // 전투 시작 처리 함수
+  const handleCombatStart = () => {
+    if (!dungeonState || !selectedCharacter) return;
+
+    const currentLog = getCurrentLog();
+    if (!currentLog?.data?.enemies) return;
+
+    // 선제 판정
+    const initiativeRolls: Array<{
+      name: string;
+      roll: number;
+      isPlayer: boolean;
+      enemyIndex?: number;
+    }> = [];
+
+    // 플레이어 선제
+    const playerDexMod = Math.floor(
+      (selectedCharacter.stats.dexterity - 10) / 2
+    );
+    const playerRoll = Math.floor(Math.random() * 20) + 1 + playerDexMod;
+    initiativeRolls.push({
+      name: selectedCharacter.name,
+      roll: playerRoll,
+      isPlayer: true,
+    });
+
+    // 적 선제
+    currentLog.data.enemies.forEach((enemy, index) => {
+      const enemyRoll = Math.floor(Math.random() * 20) + 1;
+      initiativeRolls.push({
+        name: enemy.name,
+        roll: enemyRoll,
+        isPlayer: false,
+        enemyIndex: index,
+      });
+    });
+
+    // 선제 순서 정렬
+    const sortedInitiative = initiativeRolls.sort((a, b) => b.roll - a.roll);
+    const order = sortedInitiative.map(
+      ({ name, isPlayer, enemyIndex, roll }) => ({
+        name,
+        isPlayer,
+        enemyIndex,
+        roll,
+      })
+    );
+
+    setInitiativeOrder(order);
+    setShowCombat(true);
   };
 
   const canLootRewards = (log: DungeonLog | undefined) => {
@@ -775,7 +873,7 @@ export function DungeonClient() {
                   {currentLog && (
                     <div className="space-y-4">
                       {/* 기본 설명과 이미지는 항상 표시 */}
-                      {!combatStarted && (
+                      {!showCombat && (
                         <>
                           <p className="text-lg">{currentLog.description}</p>
                           {currentLog.image && (
@@ -788,6 +886,14 @@ export function DungeonClient() {
                             </div>
                           )}
                         </>
+                      )}
+
+                      {/* 사망 상태 표시 */}
+                      {CharacterDead.dead && (
+                        <CharacterDeathCard
+                          deathCause={CharacterDead.cause}
+                          onConfirm={handleDungeonFail}
+                        />
                       )}
 
                       {/* Trap 처리 - 해결되지 않은 트랩이 있을 때만 표시 */}
@@ -822,27 +928,61 @@ export function DungeonClient() {
                       {(!currentLog.data?.trap ||
                         currentLog.data.trap.resolved) && (
                         <>
-                          {/* 전투 상태 */}
-                          {isInCombat(currentLog) &&
-                            currentLog.data?.enemies && (
-                              <DungeonCombat
-                                enemies={currentLog.data.enemies}
-                                playerHp={dungeonState.playerHP}
-                                maxPlayerHp={selectedCharacter?.hp.max || 0}
-                                character={selectedCharacter || undefined}
-                                onCombatEnd={handleCombatEnd}
-                                onCombatStart={handleCombatStart}
-                                dungeonConcept={dungeonState.concept}
-                                dungeonName={dungeonState.dungeonName}
-                                currentScene={currentLog.description}
-                              />
+                          {/* 전투 UI */}
+                          {currentLog.data?.enemies &&
+                            currentLog.data?.enemies?.length > 0 &&
+                            !currentLog.data?.combat?.resolved &&
+                            !CharacterDead.dead && (
+                              <>
+                                {!showCombat ? (
+                                  <Card className="bg-red-500/10 border-red-500/50">
+                                    <CardContent className="p-4 space-y-4">
+                                      <div className="flex items-center gap-2 text-red-600">
+                                        <SkullIcon className="w-5 h-5" />
+                                        <h3 className="font-semibold">
+                                          적대적 조우!
+                                        </h3>
+                                      </div>
+                                      <p className="text-sm text-muted-foreground">
+                                        {currentLog.data.enemies.length}명의
+                                        적이 등장했습니다:
+                                        {currentLog.data.enemies
+                                          .map(
+                                            (e) => ` ${e.name} (Lv.${e.level})`
+                                          )
+                                          .join(",")}
+                                      </p>
+                                      <Button
+                                        onClick={handleCombatStart}
+                                        className="w-full"
+                                      >
+                                        <Swords className="w-4 h-4 mr-2" />
+                                        전투 시작
+                                      </Button>
+                                    </CardContent>
+                                  </Card>
+                                ) : (
+                                  <DungeonCombat
+                                    enemies={currentLog.data.enemies}
+                                    playerHp={dungeonState.playerHP}
+                                    maxPlayerHp={selectedCharacter?.hp.max || 0}
+                                    character={dungeonState.character}
+                                    onCombatEnd={handleCombatEnd}
+                                    dungeonName={dungeonState.dungeonName}
+                                    dungeonConcept={dungeonState.concept}
+                                    currentScene={currentLog.description}
+                                    initiativeOrder={initiativeOrder}
+                                  />
+                                )}
+                              </>
                             )}
 
-                          {/* 전투 결과 표시 */}
-                          {currentLog.data?.combat?.resolved && (
-                            <CombatResult
+                          {/* 전투/함정 결과 표시 */}
+                          {(currentLog.data?.combat?.resolved ||
+                            currentLog.data?.trap?.resolved) && (
+                            <StatusResult
                               log={currentLog}
-                              maxHp={selectedCharacter?.hp.max || 0}
+                              maxHp={selectedCharacter?.hp.max}
                             />
                           )}
 
@@ -891,7 +1031,7 @@ export function DungeonClient() {
               <DungeonActionInput
                 value={userAction}
                 onChange={(value) => setUserAction(value)}
-                disabled={combatStarted}
+                disabled={showCombat}
                 isLoading={loadingState.action}
                 onSubmit={handleActionSubmit}
               />

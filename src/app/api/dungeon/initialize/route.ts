@@ -128,7 +128,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 캐릭터 조회
-    const character = await Character.findById(characterId);
+    const character = await Character.findById(characterId).select(
+      "name level class race hp profileImage inventory experience gold"
+    );
     if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
@@ -167,12 +169,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      dungeon: await dungeon.populate([
-        {
-          path: "characterId",
-          select: "name level class race hp profileImage",
-        },
-      ]),
+      dungeon: {
+        ...dungeon.toObject(),
+        character,
+      },
     });
   } catch (error) {
     console.error("Dungeon initialization error:", error);

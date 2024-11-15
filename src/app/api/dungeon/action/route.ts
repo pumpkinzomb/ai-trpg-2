@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import OpenAI from "openai";
-import { Character, Dungeon, Item } from "@/app/models";
-import { GenerationDungeonLog, GenerationItem } from "@/app/types";
+import { Character, Dungeon, Item, ICharacter } from "@/app/models";
+import { DungeonLog, GenerationDungeonLog, GenerationItem } from "@/app/types";
 import { generateImage } from "@/app/utils/aiDrawing";
 import { Types } from "mongoose";
 
@@ -11,7 +11,20 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// 난이도 설정을 위한 유틸리티 함수들
+const getDefaultXP = (character: ICharacter, difficulty: any, type: string) => {
+  const baseXP = Math.floor(character.level * 90);
+  const multiplier =
+    type === "combat"
+      ? 1
+      : type === "trap"
+      ? 0.7
+      : type === "treasure"
+      ? 0.3
+      : 0.2;
+
+  return Math.floor(baseXP * multiplier * difficulty.rewards.xpMultiplier);
+};
+
 const getDifficultyLevel = (
   characterLevel: number,
   currentStage: number,
@@ -92,7 +105,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const dungeon = await Dungeon.findById(dungeonId).populate("characterId");
+    const dungeon = await Dungeon.findById(dungeonId);
     if (!dungeon || !dungeon.active) {
       return NextResponse.json(
         { error: "Active dungeon not found" },
@@ -100,7 +113,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const character = await Character.findById(dungeon.characterId);
+    const character = await Character.findById(dungeon.characterId).select(
+      "name level class race hp profileImage inventory experience gold"
+    );
+
     if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
@@ -127,16 +143,50 @@ export async function POST(req: NextRequest) {
   Based on the following D&D 5e dungeon context and player action, generate the next scene.
   IMPORTANT: 
   - All descriptions, names, and text should be in Korean language
-  - BUT 'imagePrompt' must be in English for AI image generation
+  - BUT 'imagePrompt' must be in English for image generation
   
   Current dungeon: ${dungeon.dungeonName}
+  Current Concept: ${dungeon.concept}
   Current stage: ${dungeon.currentStage + 1}/${dungeon.maxStages}
-  Concept: ${dungeon.concept}
-  Character level: ${character.level}
-  Player HP: ${dungeon.playerHP}/${character.hp.max}
-  Latest scene: ${
-    dungeon.logs[dungeon.logs.length - 1]?.description || "던전에 진입합니다"
-  }
+  Previous encounters: ${dungeon.logs
+    .slice(-3)
+    .map((log: DungeonLog) => log.type)
+    .join(", ")}
+  
+  PACING GUIDELINES:
+  - Stage should progress after 2-3 significant encounters
+  - Avoid consecutive encounters of the same type
+  - If last 3 encounters were combat, force a different type
+  - Current stage must progress if: combat victory AND no combat in next stage OR successful trap/puzzle completion
+  
+  ENCOUNTER VARIETY:
+  - Combat (35%): Varied enemies with different abilities
+  - Traps/Puzzles (25%): Require different skill checks
+  - Treasure Rooms (20%): After significant challenges
+  - Story/Exploration (15%): Advance plot and provide lore
+  - Rest (5%): When player HP below 70%
+  
+  REWARD DISTRIBUTION:
+  Combat Victory: 
+  - Gold: ${Math.floor(character.level * 10)} - ${Math.floor(
+      character.level * 20
+    )}
+  - Items: 40% chance
+  - XP: ${Math.floor(character.level * 15)}
+  
+  Trap Success:
+  - Gold: ${Math.floor(character.level * 5)} - ${Math.floor(
+      character.level * 15
+    )}
+  - Items: 30% chance
+  - XP: ${Math.floor(character.level * 10)}
+  
+  Treasure Room:
+  - Gold: ${Math.floor(character.level * 20)} - ${Math.floor(
+      character.level * 40
+    )}
+  - Items: 100% chance
+  - XP: ${Math.floor(character.level * 5)}
   
   Difficulty settings:
   - Enemy levels should be around level ${
@@ -151,8 +201,42 @@ export async function POST(req: NextRequest) {
       : ""
   }
   
-  Player action: "${action}"
+  REWARD GUIDELINES:
+  For combat encounters:
+  - Regular enemies may drop ${Math.floor(character.level * 10)} - ${Math.floor(
+      character.level * 20
+    )} gold
+  - Elite or boss enemies have higher chances for valuable items
+  - XP rewards scale with enemy difficulty
+
+  For treasure rooms:
+  - Should contain multiple items and significant gold
+  - Higher quality items than regular encounters
+
+  For traps and challenges:
+  - Successful navigation may reveal hidden treasures
+  - Complex traps can guard valuable rewards
+
+  Item rarity chances:
+  - Common: ${(difficulty.rewards.itemRarityChance.common * 100).toFixed(1)}%
+  - Uncommon: ${(difficulty.rewards.itemRarityChance.uncommon * 100).toFixed(
+    1
+  )}%
+  - Rare: ${(difficulty.rewards.itemRarityChance.rare * 100).toFixed(1)}%
+  - Epic: ${(difficulty.rewards.itemRarityChance.epic * 100).toFixed(1)}%
+  - Legendary: ${(difficulty.rewards.itemRarityChance.legendary * 100).toFixed(
+    1
+  )}%
   
+  Scene type distribution (not strict):
+  - Combat: 40%
+  - Trap: 25%
+  - Treasure: 20%
+  - Story: 10%
+  - Rest: 5%
+  
+  Player action: "${action}"
+
   Consider the following elements for scene generation:
   - All descriptions and texts must be in Korean EXCEPT for imagePrompt
   - Use appropriate Korean fantasy terminology
@@ -247,11 +331,21 @@ export async function POST(req: NextRequest) {
   5. Descriptions should be vivid and reflect the tension of the moment
   
   Return ONLY the JSON object with no additional text.
+
+  Recent History:
+  ${JSON.stringify(dungeon.logs, null, 2)}
 `;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
-      messages: [{ role: "user", content: prompt }],
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a dungeon master creating varied and engaging encounters. Balance combat with exploration and ensure appropriate stage progression. Each stage should take 2-3 encounters, with varied rewards based on challenge type and significance. Consider previous encounters when generating new ones.",
+        },
+        { role: "user", content: prompt },
+      ],
       temperature: 0.7,
       response_format: { type: "json_object" },
     });
@@ -355,9 +449,13 @@ export async function POST(req: NextRequest) {
         enemies: result.data?.enemies,
         rewards: result.data?.rewards
           ? {
-              gold: result.data.rewards.gold,
-              xp: result.data.rewards.xp,
-              items: result.data.rewards.items,
+              gold: Math.floor(Number(result.data.rewards.gold) || 0), // 숫자로 변환하고 floor 처리
+              xp:
+                Math.floor(Number(result.data.rewards.xp)) ||
+                getDefaultXP(character, difficulty, result.type),
+              items: Array.isArray(result.data.rewards.items)
+                ? result.data.rewards.items
+                : [],
               goldLooted: false,
             }
           : undefined,
@@ -395,7 +493,10 @@ export async function POST(req: NextRequest) {
       }
     ).populate("characterId");
 
-    return NextResponse.json(updatedDungeon);
+    return NextResponse.json({
+      ...updatedDungeon.toObject(),
+      character,
+    });
   } catch (error) {
     console.error("Dungeon action error:", error);
     return NextResponse.json(

@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback } from "react";
+"use client";
+
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import useSWRMutation from "swr/mutation";
 import {
   Heart,
   Swords,
   Shield,
   Clock,
   Sword,
-  SkullIcon,
   Flame,
   Zap,
   Shield as ShieldIcon,
@@ -24,37 +26,37 @@ import {
   Target,
   X,
 } from "lucide-react";
+import debounce from "lodash/debounce";
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Character, UsedItem } from "@/app/types";
 import { calculatePlayerAC } from "@/app/utils/character";
 import { useToast } from "@/hooks/use-toast";
 import CombatInventory from "./CombatInventory";
-import DiceIcon from "./DiceIcon";
+import AttackButton from "./AttackButton";
 import CombatLog from "./CombatLog";
+import { CombatLayout, EnemyCard } from "./DungeonCombatUi";
+import {
+  calculateAbilityEffects,
+  calculateIncomingDamage,
+  processSpecialAbilityHeal,
+} from "@/app/utils/combat";
 
-type InitiativeRoll = {
-  name: string;
-  roll: number;
-  isPlayer: boolean;
-  enemyIndex?: number;
-};
-
-// 인터페이스 정의
 interface DungeonCombatProps {
   enemies: {
     name: string;
     level: number;
     hp: number;
     ac: number;
-    attacks: {
+    attacks: Array<{
       name: string;
       damage: string;
       toHit: number;
-    }[];
+    }>;
   }[];
   playerHp: number;
   maxPlayerHp: number;
@@ -64,10 +66,15 @@ interface DungeonCombatProps {
     remainingHp: number;
     usedItems: UsedItem[];
   }) => void;
-  onCombatStart: (value: boolean) => void;
   dungeonName: string;
   dungeonConcept: string;
   currentScene: string;
+  initiativeOrder: Array<{
+    name: string;
+    isPlayer: boolean;
+    enemyIndex?: number;
+    roll?: number;
+  }>;
 }
 
 interface CombatImage {
@@ -115,6 +122,13 @@ interface ClassAbility {
   };
 }
 
+interface DiceResult {
+  roll: number;
+  modifier: number;
+  total: number;
+  type: "normal" | "critical" | "miss";
+}
+
 export default function DungeonCombat({
   enemies,
   playerHp,
@@ -123,10 +137,21 @@ export default function DungeonCombat({
   onCombatEnd,
   dungeonName,
   dungeonConcept,
-  onCombatStart,
   currentScene,
+  initiativeOrder,
 }: DungeonCombatProps) {
-  // State 정의
+  const imageGeneratedRef = React.useRef(false);
+  const promptRef = React.useRef<Record<string, string> | null>(null);
+  const initRef = React.useRef<{
+    initialized: boolean; // renamed from isInitialized for clarity
+    logsAdded: boolean;
+  }>({
+    initialized: false,
+    logsAdded: false,
+  });
+
+  console.log("character 111", character);
+
   const [combatLog, setCombatLog] = useState<
     Array<{
       text: string;
@@ -152,11 +177,6 @@ export default function DungeonCombat({
   });
   const [currentPlayerHp, setCurrentPlayerHp] = useState(playerHp);
   const [isPlayerTurn, setIsPlayerTurn] = useState(false);
-  const [combatStarted, setCombatStarted] = useState(false);
-  const [combatImage, setCombatImage] = useState<CombatImage>({
-    url: null,
-    loading: false,
-  });
   const [selectedTarget, setSelectedTarget] = useState<number | null>(null);
   const [currentRound, setCurrentRound] = useState(1);
   const [combatState, setCombatState] = useState<CombatState>({
@@ -167,18 +187,88 @@ export default function DungeonCombat({
   });
   const [availableActions, setAvailableActions] = useState<ClassAbility[]>([]);
   const [showActionMenu, setShowActionMenu] = useState(false);
-  const [lastAttackRoll, setLastAttackRoll] = useState<{
-    roll: number;
-    modifier: number;
-    total: number;
-    type: "normal" | "critical" | "miss";
-  } | null>(null);
+  const [lastAttackRoll, setLastAttackRoll] = useState<DiceResult | null>(null);
   const [diceRolling, setDiceRolling] = useState(false);
-  const [diceResult, setDiceResult] = useState<{
-    sides: number;
-    result: number;
-    rolling: boolean;
-  } | null>(null);
+
+  const [combatImage, setCombatImage] = useState<CombatImage>(() => ({
+    url: null,
+    loading: false,
+  }));
+  const logProcessedRef = React.useRef<Set<string>>(new Set());
+  const apiCallInProgressRef = React.useRef(false);
+
+  // 캐시 키 생성을 위한 유틸리티 함수
+  const getCacheKey = (dungeonName: string, enemies: any[]) => {
+    return `${dungeonName}-${enemies.map((e) => e.name).join("-")}`;
+  };
+
+  const debouncedImageFetcher = useMemo(
+    () =>
+      debounce(
+        async (url: string, { arg }: { arg: any }) => {
+          if (apiCallInProgressRef.current) return null;
+          apiCallInProgressRef.current = true;
+
+          try {
+            const res = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(arg),
+            });
+            return res.json();
+          } finally {
+            apiCallInProgressRef.current = false;
+          }
+        },
+        1000,
+        { leading: true, trailing: false }
+      ),
+    []
+  );
+
+  const debouncedPromptFetcher = useMemo(
+    () =>
+      debounce(
+        async (url: string, { arg }: { arg: any }) => {
+          if (apiCallInProgressRef.current) return null;
+          apiCallInProgressRef.current = true;
+
+          try {
+            const cacheKey = getCacheKey(arg.dungeonName, arg.enemies);
+            if (promptRef.current?.[cacheKey]) {
+              return { prompt: promptRef.current[cacheKey] };
+            }
+
+            const res = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(arg),
+            });
+            const data = await res.json();
+
+            if (!promptRef.current) promptRef.current = {};
+            promptRef.current[cacheKey] = data.prompt;
+            return data;
+          } finally {
+            apiCallInProgressRef.current = false;
+          }
+        },
+        1000,
+        { leading: true, trailing: false }
+      ),
+    []
+  );
+
+  // useSWRMutation hooks
+  const { trigger: triggerPrompt, isMutating: isGeneratingPrompt } =
+    useSWRMutation("/api/generate-combat-prompt", debouncedPromptFetcher, {
+      revalidate: false,
+    });
+
+  const { trigger: triggerImage, isMutating: isGeneratingImage } =
+    useSWRMutation("/api/generate-image", debouncedImageFetcher, {
+      revalidate: false,
+    });
 
   const { toast } = useToast();
 
@@ -190,7 +280,14 @@ export default function DungeonCombat({
       text: string,
       type: "normal" | "critical" | "miss" | "system" = "normal"
     ) => {
+      // 로그 중복 체크
+      const logKey = `${text}-${type}-${Date.now()}`; // 타임스탬프 추가로 더 정확한 중복 체크
+      if (logProcessedRef.current.has(logKey)) {
+        return;
+      }
+
       setCombatLog((prev) => [...prev, { text, type }]);
+      logProcessedRef.current.add(logKey);
     },
     []
   );
@@ -232,22 +329,13 @@ export default function DungeonCombat({
       count: number = 1,
       advantage: "none" | "advantage" | "disadvantage" = "none"
     ) => {
-      // 먼저 주사위 굴리기 시작
       setDiceRolling(true);
-      console.log("Started rolling animation");
 
       try {
-        // 실제 애니메이션 시간 동안 대기
         await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // 실제 주사위 결과 계산
-        const result = rollDice(sides, count, advantage);
-
-        return result;
+        return rollDice(sides, count, advantage);
       } finally {
-        // 애니메이션 종료
         setDiceRolling(false);
-        console.log("Ended rolling animation");
       }
     },
     [rollDice]
@@ -381,7 +469,6 @@ export default function DungeonCombat({
     // 턴 상태 업데이트
     setCurrentTurnIndex(nextIndex);
     setIsPlayerTurn(nextActor.isPlayer);
-    setSelectedTarget(null);
   }, [currentTurnIndex, turnOrder, enemyState, currentRound, checkCombatEnd]);
 
   // 아이템 사용 처리 함수
@@ -470,46 +557,61 @@ export default function DungeonCombat({
   );
 
   // 전투 이미지 생성
-  const generateCombatImage = async () => {
-    if (!character) return;
+  const generateCombatImage = useCallback(async () => {
+    if (imageGeneratedRef.current || combatImage.loading || !character) {
+      return;
+    }
 
-    setCombatImage({ url: null, loading: true });
+    console.log("Generating combat image");
+    setCombatImage((prev) => ({ ...prev, loading: true }));
+
     try {
-      const promptResponse = await fetch("/api/generate-combat-prompt", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          character: character,
-          enemies: enemies,
+      const cacheKey = getCacheKey(dungeonName, enemies);
+      let prompt: string;
+
+      // 프롬프트가 이미 있다면 그대로 사용
+      if (promptRef.current?.[cacheKey]) {
+        prompt = promptRef.current[cacheKey];
+      } else {
+        const promptResult = await triggerPrompt({
+          character,
+          enemies,
           dungeonName,
           dungeonConcept,
           currentScene,
-        }),
-      });
-
-      if (!promptResponse.ok) {
-        throw new Error("Failed to generate prompt");
+        });
+        if (!promptResult) throw new Error("Failed to generate prompt");
+        prompt = promptResult.prompt;
       }
-      const { prompt } = await promptResponse.json();
-      const response = await fetch("/api/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+
+      const imageResult = await triggerImage({
+        prompt,
       });
 
-      if (!response.ok) throw new Error("Failed to generate image");
-      const data = await response.json();
-      setCombatImage({
-        url: data.imageUrl,
-        loading: false,
-      });
+      if (!imageResult) throw new Error("Failed to generate image");
+
+      if (imageResult.imageUrl) {
+        setCombatImage({
+          url: imageResult.imageUrl,
+          loading: false,
+        });
+        imageGeneratedRef.current = true;
+      }
     } catch (error) {
       console.error("Failed to generate combat image:", error);
-      setCombatImage({ url: null, loading: false });
+      setCombatImage((prev) => ({ ...prev, loading: false }));
     }
-  };
+  }, [
+    character,
+    enemies,
+    dungeonName,
+    dungeonConcept,
+    currentScene,
+    triggerPrompt,
+    triggerImage,
+  ]);
+
+  const isLoading = isGeneratingPrompt || isGeneratingImage;
 
   // 1. 플레이어 공격 처리
   const handlePlayerAttack = useCallback(
@@ -519,18 +621,23 @@ export default function DungeonCombat({
       const target = enemyState[targetIndex];
       if (!target || target.currentHp <= 0) return;
 
+      // 특수 능력에 따른 이점 체크
+      const { hasAdvantage } = calculateAbilityEffects(
+        0,
+        combatState.activeEffects,
+        character.class
+      );
+
       // 공격 굴림
-      const advantage = combatState.advantage;
       const { total: attackRoll } = await rollDiceWithAnimation(
         20,
         1,
-        advantage
+        hasAdvantage ? "advantage" : combatState.advantage
       );
       const strMod = Math.floor((character.stats.strength - 10) / 2);
       const profBonus = Math.floor((character.level || 1) / 4) + 2;
       const toHit = attackRoll + strMod + profBonus;
 
-      // 명중 판정 결과 UI 업데이트
       setLastAttackRoll({
         roll: attackRoll,
         modifier: strMod + profBonus,
@@ -539,22 +646,16 @@ export default function DungeonCombat({
           attackRoll === 20 ? "critical" : attackRoll === 1 ? "miss" : "normal",
       });
 
-      // 미스인 경우 바로 처리
       if (attackRoll === 1 || toHit < target.ac) {
         showAttackEffect("miss", 0, targetIndex);
         addCombatLog(
           `${character.name}의 공격이 ${target.name}의 방어를 뚫지 못했습니다. (${toHit} vs AC ${target.ac})`,
           "miss"
         );
-        // 다음 턴으로 진행
         setIsPlayerTurn(false);
         nextTurn();
         return;
       }
-
-      // 데미지 계산
-      let totalDamage = 0;
-      let damageText = "";
 
       try {
         const weapon = character.equipment.weapon;
@@ -566,40 +667,39 @@ export default function DungeonCombat({
           : await rollDiceWithAnimation(4, 1);
 
         let bonusDamage = 0;
-        const isRaging = combatState.activeEffects.some((e) => e.id === "rage");
-        if (isRaging && character.class.toLowerCase() === "barbarian") {
-          bonusDamage = 2;
-        }
 
-        totalDamage =
-          attackRoll === 20
-            ? (baseDamage + bonusDamage) * 2 + strMod
-            : baseDamage + bonusDamage + strMod;
+        // 기본 데미지 계산
+        let rawDamage = baseDamage + bonusDamage + strMod;
 
-        damageText =
+        // 특수 능력 효과 적용
+        const { finalDamage } = calculateAbilityEffects(
+          rawDamage,
+          combatState.activeEffects,
+          character.class
+        );
+
+        // 치명타 처리
+        const totalDamage = attackRoll === 20 ? finalDamage * 2 : finalDamage;
+
+        const damageText =
           attackRoll === 20
             ? `치명타! ${character.name}의 강력한 공격이 ${target.name}에게 ${totalDamage}의 치명적인 피해를 입혔습니다!`
             : `${character.name}의 공격이 ${target.name}에게 ${totalDamage}의 피해를 입혔습니다.`;
 
-        // 데미지와 효과를 동시에 적용
         let enemyDied = false;
-
         await Promise.all([
           new Promise<void>((resolve) => {
             setEnemyState((prev) => {
               const newState = [...prev];
               const currentHp = newState[targetIndex].currentHp;
               const newHp = Math.max(0, currentHp - totalDamage);
-
               newState[targetIndex] = {
                 ...newState[targetIndex],
                 currentHp: newHp,
               };
-
               if (newHp === 0 && currentHp > 0) {
                 enemyDied = true;
               }
-
               return newState;
             });
             resolve();
@@ -607,16 +707,11 @@ export default function DungeonCombat({
           showAttackEffect("damage", totalDamage, targetIndex),
         ]);
 
-        // 공격 로그 기록
         addCombatLog(damageText, attackRoll === 20 ? "critical" : "normal");
 
-        // 죽음 메시지는 한 번만 출력
         if (enemyDied) {
           addCombatLog(`${target.name}이(가) 쓰러졌습니다!`, "system");
-
-          // 모든 적이 죽었는지 확인
           const allEnemiesDead = enemyState.every((enemy, idx) => {
-            // 현재 처리중인 적은 이미 죽은 것으로 처리
             if (idx === targetIndex) return true;
             return enemy.currentHp <= 0;
           });
@@ -628,11 +723,10 @@ export default function DungeonCombat({
               remainingHp: currentPlayerHp,
               usedItems,
             });
-            return; // 전투 종료시 함수 종료
+            return;
           }
         }
 
-        // 전투가 끝나지 않았다면 다음 턴으로
         setIsPlayerTurn(false);
         nextTurn();
       } catch (error) {
@@ -663,7 +757,6 @@ export default function DungeonCombat({
         return;
       }
 
-      // 공격 실행
       const { total: attackRoll } = rollDice(20);
       const attack =
         enemy.attacks[Math.floor(Math.random() * enemy.attacks.length)];
@@ -684,17 +777,14 @@ export default function DungeonCombat({
         return true;
       };
 
-      // 데미지 계산 함수 추가
       const calculateDamage = (damageString: string): number => {
         try {
-          // "2d6+3" 또는 "1d8" 형식의 문자열 파싱
           const parts = damageString.split("+");
-          const dicePart = parts[0].trim(); // "2d6"
-          const bonusPart = parts[1]?.trim(); // "3" or undefined
+          const dicePart = parts[0].trim();
+          const bonusPart = parts[1]?.trim();
 
           const [diceCount, diceSides] = dicePart.split("d").map(Number);
 
-          // 유효성 검사
           if (
             isNaN(diceCount) ||
             isNaN(diceSides) ||
@@ -702,7 +792,7 @@ export default function DungeonCombat({
             diceSides <= 0
           ) {
             console.error(`Invalid damage string format: ${damageString}`);
-            return 1; // 기본 데미지 반환
+            return 1;
           }
 
           const { total: diceRoll } = rollDice(diceSides, diceCount);
@@ -711,22 +801,29 @@ export default function DungeonCombat({
           return diceRoll + (isNaN(bonus) ? 0 : bonus);
         } catch (error) {
           console.error(`Error calculating damage: ${error}`, damageString);
-          return 1; // 오류 발생시 기본 데미지 반환
+          return 1;
         }
       };
 
       if (attackRoll === 20) {
-        const damage = calculateDamage(attack.damage);
+        let damage = calculateDamage(attack.damage);
         const criticalDamage = damage * 2;
 
-        const newHp = Math.max(0, currentPlayerHp - criticalDamage);
+        // 특수 능력에 따른 피해 감소 적용
+        const finalDamage = calculateIncomingDamage(
+          criticalDamage,
+          combatState.activeEffects,
+          character?.class
+        );
+
+        const newHp = Math.max(0, currentPlayerHp - finalDamage);
         setCurrentPlayerHp(newHp);
 
-        showAttackEffect("damage", criticalDamage, "player");
+        showAttackEffect("damage", finalDamage, "player");
         addCombatLog(
           `치명타! ${enemy.name}의 ${
             attack.name || "일반"
-          } 공격이 플레이어에게 ${criticalDamage}의 치명적인 피해를 입혔습니다!`,
+          } 공격이 플레이어에게 ${finalDamage}의 치명적인 피해를 입혔습니다!`,
           "critical"
         );
 
@@ -734,15 +831,23 @@ export default function DungeonCombat({
           return handlePlayerDeath();
         }
       } else if (toHit >= playerAC && attackRoll !== 1) {
-        const damage = calculateDamage(attack.damage);
-        const newHp = Math.max(0, currentPlayerHp - damage);
+        let damage = calculateDamage(attack.damage);
+
+        // 특수 능력에 따른 피해 감소 적용
+        const finalDamage = calculateIncomingDamage(
+          damage,
+          combatState.activeEffects,
+          character?.class
+        );
+
+        const newHp = Math.max(0, currentPlayerHp - finalDamage);
         setCurrentPlayerHp(newHp);
 
-        showAttackEffect("damage", damage, "player");
+        showAttackEffect("damage", finalDamage, "player");
         addCombatLog(
           `${enemy.name}의 ${
             attack.name || "일반"
-          } 공격이 플레이어에게 ${damage}의 피해를 입혔습니다.`,
+          } 공격이 플레이어에게 ${finalDamage}의 피해를 입혔습니다.`,
           "normal"
         );
 
@@ -772,79 +877,150 @@ export default function DungeonCombat({
       addCombatLog,
       onCombatEnd,
       nextTurn,
+      combatState.activeEffects,
     ]
   );
 
-  // 3. 전투 시작 처리
-  const startCombat = useCallback(async () => {
-    setCombatStarted(true);
-    onCombatStart(true);
+  const generateCombatPromptAndImage = useCallback(async () => {
+    if (
+      imageGeneratedRef.current ||
+      !character ||
+      combatImage.loading ||
+      apiCallInProgressRef.current
+    ) {
+      return;
+    }
 
-    await generateCombatImage();
+    let retryCount = 0;
+    const maxRetries = 2;
+    const retryDelay = 2000;
 
-    // 전투 초기화
-    const initiativeRolls: InitiativeRoll[] = [];
+    console.log("Starting combat image generation");
+    setCombatImage((prev) => ({ ...prev, loading: true }));
 
-    // 플레이어 선제
-    const playerDexMod = character
-      ? Math.floor((character.stats.dexterity - 10) / 2)
-      : 0;
-    const playerRoll = rollDice(20).total + playerDexMod;
-    initiativeRolls.push({
-      name: character?.name || "Player",
-      roll: playerRoll,
-      isPlayer: true,
-    });
+    try {
+      const cacheKey = getCacheKey(dungeonName, enemies);
+      let prompt: string;
 
-    // 적 선제
-    enemies.forEach((enemy, index) => {
-      const enemyRoll = rollDice(20).total;
-      initiativeRolls.push({
-        name: enemy.name,
-        roll: enemyRoll,
-        isPlayer: false,
-        enemyIndex: index,
-      });
-    });
+      if (promptRef.current?.[cacheKey]) {
+        prompt = promptRef.current[cacheKey];
+      } else {
+        const promptResult = await triggerPrompt({
+          character,
+          enemies,
+          dungeonName,
+          dungeonConcept,
+          currentScene,
+        });
+        if (!promptResult) throw new Error("Failed to generate prompt");
+        prompt = promptResult.prompt;
+      }
 
-    const sortedInitiative = initiativeRolls.sort((a, b) => b.roll - a.roll);
-    const order = sortedInitiative.map(({ name, isPlayer, enemyIndex }) => ({
-      name,
-      isPlayer,
-      enemyIndex,
-    }));
+      while (retryCount < maxRetries) {
+        try {
+          const imageResult = await triggerImage({ prompt });
+          if (imageResult?.imageUrl) {
+            setCombatImage({
+              url: imageResult.imageUrl,
+              loading: false,
+            });
+            imageGeneratedRef.current = true;
+            return;
+          }
+        } catch (error) {
+          console.error(
+            `Image generation attempt ${retryCount + 1} failed:`,
+            error
+          );
+          if (retryCount < maxRetries - 1) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelay));
+          }
+        }
+        retryCount++;
+      }
 
-    setTurnOrder(order);
-    addCombatLog(
-      `전투가 시작됐습니다! 선제점 순서: ${sortedInitiative
-        .map((i) => `${i.name}(${i.roll})`)
-        .join(", ")}`,
-      "system"
-    );
-  }, [character, enemies, dungeonName, dungeonConcept, rollDice, addCombatLog]);
-
-  useEffect(() => {
-    if (combatStarted && turnOrder.length > 0 && currentRound === 1) {
-      // 전투 시작 시에만 한 번 출력
-      addCombatLog(
-        `${dungeonName || "던전"}에서 전투가 시작됐습니다!`,
-        "system"
-      );
-      enemies.forEach((enemy) => {
-        addCombatLog(`${enemy.name}이(가) 나타났습니다!`, "system");
+      throw new Error("Failed all retry attempts");
+    } catch (error) {
+      console.error("Failed to generate combat image:", error);
+      setCombatImage((prev) => ({ ...prev, loading: false }));
+      toast({
+        title: "이미지 생성 실패",
+        description:
+          "전투 이미지를 생성하지 못했습니다. 전투는 계속 진행됩니다.",
+        variant: "destructive",
       });
     }
   }, [
-    combatStarted,
-    turnOrder,
+    character,
     dungeonName,
     enemies,
-    currentRound,
-    addCombatLog,
+    dungeonConcept,
+    currentScene,
+    triggerPrompt,
+    triggerImage,
+    toast,
   ]);
 
   useEffect(() => {
-    if (!combatStarted || !turnOrder[currentTurnIndex]) return;
+    if (initRef.current.initialized || apiCallInProgressRef.current) return;
+
+    const initializeCombat = async () => {
+      // 로그 추가는 한 번만 실행
+      if (!initRef.current.logsAdded) {
+        const initLogs = [
+          {
+            text: `${dungeonName || "던전"}에서 전투가 시작됐습니다!`,
+            type: "system" as const,
+          },
+          {
+            text: `${enemies
+              .map((enemy) => `${enemy.name}이(가) 나타났습니다!`)
+              .join("\n")}`,
+            type: "system" as const,
+          },
+          {
+            text: `전투가 시작됐습니다! 선제점 순서: ${initiativeOrder
+              .map((i) => `${i.name}(${i.roll})`)
+              .join(", ")}`,
+            type: "system" as const,
+          },
+        ];
+        setCombatLog(initLogs);
+        initRef.current.logsAdded = true;
+      }
+
+      setTurnOrder(initiativeOrder);
+
+      if (
+        !imageGeneratedRef.current &&
+        !combatImage.url &&
+        !apiCallInProgressRef.current
+      ) {
+        await generateCombatPromptAndImage();
+      }
+
+      initRef.current.initialized = true;
+    };
+
+    initializeCombat();
+  }, [initiativeOrder, generateCombatPromptAndImage]);
+
+  useEffect(() => {
+    return () => {
+      debouncedImageFetcher.cancel();
+      debouncedPromptFetcher.cancel();
+      initRef.current = {
+        initialized: false,
+        logsAdded: false,
+      };
+      imageGeneratedRef.current = false;
+      promptRef.current = null;
+      apiCallInProgressRef.current = false;
+    };
+  }, [debouncedImageFetcher, debouncedPromptFetcher]);
+
+  useEffect(() => {
+    if (!turnOrder[currentTurnIndex]) return;
 
     const currentTurn = turnOrder[currentTurnIndex];
     setIsPlayerTurn(currentTurn.isPlayer);
@@ -856,7 +1032,7 @@ export default function DungeonCombat({
 
       return () => clearTimeout(timeoutId);
     }
-  }, [currentTurnIndex, combatStarted, turnOrder, handleEnemyTurn]);
+  }, [currentTurnIndex, turnOrder, handleEnemyTurn]);
 
   // 2. 클래스별 특수 능력 초기화
   useEffect(() => {
@@ -1290,6 +1466,88 @@ export default function DungeonCombat({
     [character, currentPlayerHp, toast]
   );
 
+  // 특수 능력 사용 처리 함수
+  const handleSpecialAbility = useCallback(
+    async (ability: ClassAbility) => {
+      if (!character || !isPlayerTurn) return;
+      if (!consumeAbilityResource(ability)) return;
+
+      let effectApplied = false;
+      let healAmount = 0;
+
+      // 효과 적용
+      switch (ability.name) {
+        case "치유의 기운": // Fighter's Second Wind
+          healAmount = processSpecialAbilityHeal(
+            { id: "second-wind", name: "치유의 기운" },
+            character.level
+          );
+          if (healAmount > 0) {
+            const newHp = Math.min(maxPlayerHp, currentPlayerHp + healAmount);
+            setCurrentPlayerHp(newHp);
+            showAttackEffect("heal", healAmount, "player");
+            addCombatLog(
+              `${character.name}이(가) 치유의 기운으로 ${healAmount}의 체력을 회복했습니다.`,
+              "system"
+            );
+            effectApplied = true;
+          }
+          break;
+
+        case "신성한 손길": // Paladin's Lay on Hands
+          healAmount = processSpecialAbilityHeal(
+            { id: "lay-on-hands", name: "신성한 손길" },
+            character.level
+          );
+          if (healAmount > 0) {
+            const newHp = Math.min(maxPlayerHp, currentPlayerHp + healAmount);
+            setCurrentPlayerHp(newHp);
+            showAttackEffect("heal", healAmount, "player");
+            addCombatLog(
+              `${character.name}이(가) 신성한 손길로 ${healAmount}의 체력을 회복했습니다.`,
+              "system"
+            );
+            effectApplied = true;
+          }
+          break;
+
+        default:
+          // 기존 버프/디버프 효과 처리
+          setCombatState(ability.effect(combatState));
+          addCombatLog(
+            `${character.name}이(가) ${ability.name}을(를) 사용했습니다.`,
+            "system"
+          );
+          effectApplied = true;
+      }
+
+      if (effectApplied) {
+        toast({
+          title: "특수 능력 사용",
+          description: `${ability.name}을(를) 사용했습니다.`,
+        });
+      }
+
+      // 턴 종료 여부 확인
+      if (ability.name !== "행동 쇄도") {
+        setIsPlayerTurn(false);
+        nextTurn();
+      }
+    },
+    [
+      character,
+      isPlayerTurn,
+      maxPlayerHp,
+      currentPlayerHp,
+      combatState,
+      consumeAbilityResource,
+      showAttackEffect,
+      addCombatLog,
+      toast,
+      nextTurn,
+    ]
+  );
+
   const getUnavailabilityReason = useCallback(
     (conditions?: {
       minHp?: number;
@@ -1342,116 +1600,23 @@ export default function DungeonCombat({
     [character]
   );
 
-  const AttackButton = ({
-    onClick,
-    selected,
-    targetIndex,
-  }: {
-    onClick: () => void;
-    selected: boolean;
-    targetIndex: number;
-  }) => (
-    <Button
-      size="sm"
-      onClick={onClick}
-      variant={selected ? "default" : "outline"}
-      className={cn("relative group", diceRolling && "pointer-events-none")}
-      disabled={diceRolling}
-    >
-      <div className="flex items-center justify-center gap-2 w-full h-full">
-        <Sword className="w-4 h-4" />
-        <span>공격</span>
-        {diceRolling && selectedTarget === targetIndex && (
-          <div className="flex items-center justify-center">
-            <DiceIcon rolling={true} />
-          </div>
-        )}
-      </div>
-      {diceResult && selectedTarget === targetIndex && (
-        <div
-          className={cn(
-            "absolute -top-8 left-1/2 -translate-x-1/2",
-            "bg-background text-foreground",
-            "px-2 py-1 rounded-md shadow-md border",
-            "text-sm font-bold",
-            "transform transition-all duration-200",
-            diceResult.rolling ? "scale-110" : "scale-100"
-          )}
-        >
-          {diceResult.result}
-        </div>
-      )}
-    </Button>
-  );
-
   return (
     <div className="space-y-4">
-      {!combatStarted ? (
-        // 전투 시작 전 화면
-        <div className="space-y-4">
-          <Card className="bg-red-500/10 border-red-500/50">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 text-red-600">
-                <SkullIcon className="w-5 h-5" />
-                <h3 className="font-semibold">적대적 조우!</h3>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {enemies.length}명의 적이 등장했습니다:
-                {enemies.map((e) => ` ${e.name} (Lv.${e.level})`).join(",")}
-              </p>
-            </CardContent>
-          </Card>
-          <Button onClick={startCombat} className="w-full">
-            <Swords className="w-4 h-4 mr-2" />
-            전투 시작
-          </Button>
-        </div>
-      ) : (
-        // 전투 진행 화면
-        <div className="space-y-4">
-          {/* 전투 이미지 */}
-          {combatImage.loading ? (
-            <Card className="aspect-video w-full bg-muted animate-pulse">
-              <CardContent className="h-full flex items-center justify-center">
-                <p className="text-muted-foreground">전투 장면 생성 중...</p>
-              </CardContent>
-            </Card>
-          ) : combatImage.url ? (
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg">
-              <img
-                src={combatImage.url}
-                alt="Combat Scene"
-                className="w-full h-full object-cover"
-              />
-            </div>
-          ) : null}
-
-          {/* 현재 턴 & 라운드 정보 */}
-          <div className="bg-primary/10 p-4 rounded-lg flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4" />
-              <span className="font-semibold">
-                {turnOrder[currentTurnIndex]?.name}의 턴
-              </span>
-            </div>
-            <div className="text-sm font-medium px-3 py-1 bg-primary/20 rounded-full">
-              Round {currentRound}
-            </div>
-          </div>
-
-          {/* 플레이어 상태 */}
-          <Card
-            className={cn(
-              "border transition-colors duration-300",
-              currentPlayerHp < maxPlayerHp * 0.3
-                ? "border-red-500/50 bg-red-500/5"
-                : currentPlayerHp < maxPlayerHp * 0.6
-                ? "border-yellow-500/50 bg-yellow-500/5"
-                : "border-green-500/50 bg-green-500/5"
-            )}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
+      <CombatLayout combatImage={combatImage}>
+        <div className="absolute top-0 left-0 right-0 p-4 bg-black/50 backdrop-blur-sm z-30">
+          <div className="flex items-center justify-between gap-4">
+            {/* HP & AC Card */}
+            <Card
+              className={cn(
+                "border transition-colors duration-300 flex-1",
+                currentPlayerHp < maxPlayerHp * 0.3
+                  ? "border-red-500/50 bg-red-500/5"
+                  : currentPlayerHp < maxPlayerHp * 0.6
+                  ? "border-yellow-500/50 bg-yellow-500/5"
+                  : "border-green-500/50 bg-green-500/5"
+              )}
+            >
+              <CardContent className="p-4">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <Heart
@@ -1478,171 +1643,220 @@ export default function DungeonCombat({
                     <span>AC {calculatePlayerAC(character)}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  {character && (
+              </CardContent>
+            </Card>
+
+            {/* Character Info Card */}
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{character?.name}</span>
+                  <span className="text-xs px-2 py-1 rounded-full bg-primary/20">
+                    Lv.{character?.level} {character?.class}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Turn Info Card */}
+            <Card className="bg-primary/10 border-primary/20">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    <span className="font-semibold">
+                      {turnOrder[currentTurnIndex]?.name}의 턴
+                    </span>
+                  </div>
+                  <div className="text-sm font-medium px-3 py-1 bg-primary/20 rounded-full">
+                    Round {currentRound}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+        {/* 적 목록 - 우측에 떠있는 카드 형태 */}
+        <div className="absolute right-4 top-28 w-80 space-y-2">
+          {enemyState.map((enemy, index) => (
+            <EnemyCard
+              key={index}
+              selected={selectedTarget === index}
+              onClick={() =>
+                isPlayerTurn && enemy.currentHp > 0 && setSelectedTarget(index)
+              }
+              dead={enemy.currentHp <= 0}
+            >
+              <CardContent className="p-4">
+                <div className="flex justify-between items-center">
+                  <div className="space-y-1">
+                    <h4 className="font-semibold flex items-center gap-2">
+                      {enemy.name}
+                      {enemy.currentHp <= 0 && (
+                        <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-500">
+                          Dead
+                        </span>
+                      )}
+                      {enemy.status.map((status, i) => (
+                        <span
+                          key={i}
+                          className="text-xs px-2 py-1 rounded-full bg-primary/20"
+                        >
+                          {status}
+                        </span>
+                      ))}
+                    </h4>
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <span>AC {enemy.ac}</span>
+                      <span>•</span>
+                      <span>Lv.{enemy.level}</span>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">
-                        {character.name}
-                      </span>
-                      <span className="text-xs px-2 py-1 rounded-full bg-primary/20">
-                        Lv.{character.level} {character.class}
+                      <Heart
+                        className={cn(
+                          "w-4 h-4",
+                          enemy.currentHp < enemy.hp * 0.3
+                            ? "text-red-500"
+                            : enemy.currentHp < enemy.hp * 0.6
+                            ? "text-yellow-500"
+                            : "text-green-500"
+                        )}
+                      />
+                      <span>
+                        {enemy.currentHp} / {enemy.hp}
                       </span>
                     </div>
-                  )}
-                  {isPlayerTurn && (
-                    <CombatInventory
-                      items={character?.inventory || []}
-                      onUseItem={handleUseItem}
-                      disabled={!isPlayerTurn || diceRolling}
-                      usedItems={usedItems}
-                    />
-                  )}
+                    {isPlayerTurn && enemy.currentHp > 0 && (
+                      <AttackButton
+                        onClick={() => handlePlayerAttack(index)}
+                        selected={selectedTarget === index}
+                        targetIndex={index}
+                        // 새로 추가된 props
+                        diceRolling={diceRolling}
+                        selectedTarget={selectedTarget}
+                        lastAttackRoll={lastAttackRoll}
+                      />
+                    )}
+                  </div>
                 </div>
+              </CardContent>
+            </EnemyCard>
+          ))}
+        </div>
+
+        {/* 하단 컨트롤 */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-full max-w-2xl px-4">
+          <Card className="bg-black/50 backdrop-blur-sm border-white/20">
+            <CardContent className="p-4">
+              {/* 전투 로그 */}
+              <CombatLog combatLog={combatLog} />
+              {/* 액션 버튼 */}
+              <div className="flex gap-2 mt-4">
+                {/* 일반 공격 버튼 */}
+                <Button
+                  variant={selectedTarget !== null ? "default" : "outline"}
+                  onClick={() =>
+                    selectedTarget !== null &&
+                    handlePlayerAttack(selectedTarget)
+                  }
+                  disabled={
+                    !isPlayerTurn || selectedTarget === null || diceRolling
+                  }
+                  className="flex items-center gap-2"
+                >
+                  <Sword className="w-4 h-4" />
+                  공격
+                </Button>
+
+                {/* 특수 능력 버튼 */}
+                <Button
+                  variant="outline"
+                  onClick={() => setShowActionMenu(true)}
+                  disabled={
+                    !isPlayerTurn || selectedTarget === null || diceRolling
+                  }
+                  className="flex items-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  특수 능력
+                </Button>
+                {/* 인벤토리 버튼 - CombatInventory 컴포넌트로 이동했으므로 필요하다면 여기에 추가 */}
+                {isPlayerTurn && (
+                  <CombatInventory
+                    items={character?.inventory || []}
+                    onUseItem={handleUseItem}
+                    disabled={!isPlayerTurn || diceRolling}
+                    usedItems={usedItems}
+                  />
+                )}
               </div>
             </CardContent>
           </Card>
-
-          {/* 적 상태 */}
-          <div className="grid gap-4">
-            {enemyState.map((enemy, index) => (
-              <Card
-                key={index}
-                className={cn(
-                  "transition-all duration-300 cursor-pointer",
-                  enemy.currentHp <= 0 && "opacity-50",
-                  selectedTarget === index && "ring-2 ring-primary",
-                  isPlayerTurn && enemy.currentHp > 0 && "hover:border-primary"
-                )}
-                onClick={() =>
-                  isPlayerTurn &&
-                  enemy.currentHp > 0 &&
-                  setSelectedTarget(index)
-                }
-              >
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-center">
-                    <div className="space-y-1">
-                      <h4 className="font-semibold flex items-center gap-2">
-                        {enemy.name}
-                        {enemy.currentHp <= 0 && (
-                          <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-500">
-                            Dead
-                          </span>
-                        )}
-                        {enemy.status.map((status, i) => (
-                          <span
-                            key={i}
-                            className="text-xs px-2 py-1 rounded-full bg-primary/20"
-                          >
-                            {status}
-                          </span>
-                        ))}
-                      </h4>
-                      <p className="text-sm text-muted-foreground flex items-center gap-2">
-                        <span>AC {enemy.ac}</span>
-                        <span>•</span>
-                        <span>Lv.{enemy.level}</span>
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <Heart
-                          className={cn(
-                            "w-4 h-4",
-                            enemy.currentHp < enemy.hp * 0.3
-                              ? "text-red-500"
-                              : enemy.currentHp < enemy.hp * 0.6
-                              ? "text-yellow-500"
-                              : "text-green-500"
-                          )}
-                        />
-                        <span>
-                          {enemy.currentHp} / {enemy.hp}
-                        </span>
-                      </div>
-                      {isPlayerTurn && enemy.currentHp > 0 && (
-                        <AttackButton
-                          onClick={() => handlePlayerAttack(index)}
-                          selected={selectedTarget === index}
-                          targetIndex={index}
-                        />
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+        </div>
+        {/* 전투 효과 애니메이션 (기존 코드 유지) */}
+        {combatState.effects.map((effect, index) => (
+          <div
+            key={index}
+            className={cn(
+              "absolute pointer-events-none animate-bounce text-lg font-bold",
+              effect.type === "damage" && "text-red-500",
+              effect.type === "heal" && "text-green-500",
+              effect.type === "buff" && "text-blue-500",
+              effect.type === "debuff" && "text-purple-500",
+              effect.type === "miss" && "text-gray-500"
+            )}
+            style={{
+              top:
+                effect.target === "player"
+                  ? "50%"
+                  : `${effect.target * 100 + 50}px`,
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+            }}
+          >
+            {effect.text || (
+              <>
+                {effect.type === "damage" && `-${effect.value}`}
+                {effect.type === "heal" && `+${effect.value}`}
+                {effect.type === "buff" && <ShieldIcon className="w-6 h-6" />}
+                {effect.type === "debuff" && <Zap className="w-6 h-6" />}
+                {effect.type === "miss" && "MISS!"}
+              </>
+            )}
           </div>
+        ))}
+        {/* 특수 능력 메뉴 */}
+        {showActionMenu && (
+          <Card className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10">
+            <CardContent className="p-4 max-w-md">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold">특수 능력</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowActionMenu(false)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="grid gap-2">
+                {availableActions.map((action, index) => {
+                  const isAvailable = checkAbilityConditions(action.conditions);
+                  const tooltipText = !isAvailable
+                    ? getUnavailabilityReason(action.conditions)
+                    : "";
 
-          {/* 전투 로그 */}
-          <CombatLog combatLog={combatLog} />
-
-          {/* 전투 효과 애니메이션 */}
-          {combatState.effects.map((effect, index) => (
-            <div
-              key={index}
-              className={cn(
-                "absolute pointer-events-none animate-bounce text-lg font-bold",
-                effect.type === "damage" && "text-red-500",
-                effect.type === "heal" && "text-green-500",
-                effect.type === "buff" && "text-blue-500",
-                effect.type === "debuff" && "text-purple-500",
-                effect.type === "miss" && "text-gray-500"
-              )}
-              style={{
-                top:
-                  effect.target === "player"
-                    ? "50%"
-                    : `${effect.target * 100 + 50}px`,
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-              }}
-            >
-              {effect.text || (
-                <>
-                  {effect.type === "damage" && `-${effect.value}`}
-                  {effect.type === "heal" && `+${effect.value}`}
-                  {effect.type === "buff" && <ShieldIcon className="w-6 h-6" />}
-                  {effect.type === "debuff" && <Zap className="w-6 h-6" />}
-                  {effect.type === "miss" && "MISS!"}
-                </>
-              )}
-            </div>
-          ))}
-
-          {/* 특수 능력 메뉴 */}
-          {showActionMenu && (
-            <Card className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10">
-              <CardContent className="p-4 max-w-md">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold">특수 능력</h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowActionMenu(false)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="grid gap-2">
-                  {availableActions.map((action, index) => {
-                    const isAvailable = checkAbilityConditions(
-                      action.conditions
-                    );
-                    const tooltipText = !isAvailable
-                      ? getUnavailabilityReason(action.conditions)
-                      : "";
-
-                    return (
+                  return (
+                    <TooltipProvider>
                       <Tooltip key={index}>
                         <TooltipTrigger asChild>
                           <Button
                             onClick={() => {
                               if (!isAvailable) return;
-                              if (consumeAbilityResource(action)) {
-                                setCombatState(action.effect(combatState));
-                                setShowActionMenu(false);
-                              }
+                              handleSpecialAbility(action);
+                              setShowActionMenu(false);
                             }}
                             className={cn(
                               "w-full justify-between p-4",
@@ -1683,54 +1897,54 @@ export default function DungeonCombat({
                           </TooltipContent>
                         )}
                       </Tooltip>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* 마지막 공격 굴림 결과 */}
-          {lastAttackRoll && (
-            <div
-              className={cn(
-                "fixed bottom-4 right-4 p-4 rounded-lg shadow-lg",
-                lastAttackRoll.type === "critical" && "bg-red-500 text-white",
-                lastAttackRoll.type === "miss" && "bg-gray-500 text-white",
-                lastAttackRoll.type === "normal" && "bg-blue-500 text-white"
-              )}
-            >
-              <div className="text-lg font-bold">
-                {lastAttackRoll.roll} + {lastAttackRoll.modifier} ={" "}
-                {lastAttackRoll.total}
+                    </TooltipProvider>
+                  );
+                })}
               </div>
-              <div className="text-sm">
-                {lastAttackRoll.type === "critical" && "치명타!"}
-                {lastAttackRoll.type === "miss" && "빗나감!"}
-                {lastAttackRoll.type === "normal" && "공격 굴림"}
-              </div>
-            </div>
-          )}
+            </CardContent>
+          </Card>
+        )}
 
-          {/* 활성화된 효과 표시 */}
-          {combatState.activeEffects.length > 0 && (
-            <div className="flex gap-2 mt-2">
-              {combatState.activeEffects.map((effect, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    "px-2 py-1 rounded-full text-sm",
-                    effect.type === "buff" && "bg-blue-500/10 text-blue-500",
-                    effect.type === "debuff" && "bg-red-500/10 text-red-500"
-                  )}
-                >
-                  {effect.name} ({effect.duration})
-                </div>
-              ))}
+        {/* 마지막 공격 굴림 결과 */}
+        {lastAttackRoll && (
+          <div
+            className={cn(
+              "absolute bottom-4 right-4 p-4 rounded-lg shadow-lg z-50",
+              lastAttackRoll.type === "critical" && "bg-red-500 text-white",
+              lastAttackRoll.type === "miss" && "bg-gray-500 text-white",
+              lastAttackRoll.type === "normal" && "bg-blue-500 text-white"
+            )}
+          >
+            <div className="text-lg font-bold">
+              {lastAttackRoll.roll} + {lastAttackRoll.modifier} ={" "}
+              {lastAttackRoll.total}
             </div>
-          )}
-        </div>
-      )}
+            <div className="text-sm">
+              {lastAttackRoll.type === "critical" && "치명타!"}
+              {lastAttackRoll.type === "miss" && "빗나감!"}
+              {lastAttackRoll.type === "normal" && "공격 굴림"}
+            </div>
+          </div>
+        )}
+
+        {/* 활성화된 효과 표시 */}
+        {combatState.activeEffects.length > 0 && (
+          <div className="absolute top-20 left-4 flex gap-2 z-40">
+            {combatState.activeEffects.map((effect, index) => (
+              <div
+                key={index}
+                className={cn(
+                  "px-2 py-1 rounded-full text-sm",
+                  effect.type === "buff" && "bg-blue-500/10 text-blue-500",
+                  effect.type === "debuff" && "bg-red-500/10 text-red-500"
+                )}
+              >
+                {effect.name} ({effect.duration})
+              </div>
+            ))}
+          </div>
+        )}
+      </CombatLayout>
     </div>
   );
 }

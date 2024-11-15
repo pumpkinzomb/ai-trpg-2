@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
           characterId,
           {
             $inc: {
-              xp: escapeResults.xpReward,
+              experience: escapeResults.xpReward,
               gold: finalGold,
             },
           },

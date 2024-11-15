@@ -73,38 +73,37 @@ export async function POST(req: NextRequest) {
     };
 
     // 업데이트 수행
-    const updatedDungeon = await Dungeon.findByIdAndUpdate(
-      dungeonId,
-      updateQuery,
-      {
+    const [character, updatedDungeon] = await Promise.all([
+      Character.findByIdAndUpdate(
+        dungeon.characterId,
+        {
+          $push: { inventory: itemObjectId },
+        },
+        {
+          new: true,
+          session: mongoSession,
+          runValidators: true,
+          select:
+            "name level class race hp profileImage inventory experience gold",
+        }
+      ),
+      Dungeon.findByIdAndUpdate(dungeonId, updateQuery, {
         new: true,
         session: mongoSession,
         runValidators: true,
-        select: "+temporaryInventory", // select 옵션 추가
-      }
-    ).populate("characterId");
+      }),
+    ]);
 
     if (!updatedDungeon) {
       throw new Error("Failed to update dungeon");
     }
 
-    if (updatedDungeon.characterId) {
-      await Character.findByIdAndUpdate(
-        updatedDungeon.characterId._id,
-        {
-          $push: { inventory: itemObjectId },
-        },
-        { new: true, session: mongoSession, runValidators: true }
-      );
-    }
-
     await mongoSession.commitTransaction();
 
-    const finalDungeon = await Dungeon.findById(dungeonId)
-      .select("+temporaryInventory")
-      .populate("characterId");
-
-    return NextResponse.json(finalDungeon);
+    return NextResponse.json({
+      ...updatedDungeon.toObject(),
+      character,
+    });
   } catch (error) {
     await mongoSession.abortTransaction();
     console.error("Dungeon loot error:", error);

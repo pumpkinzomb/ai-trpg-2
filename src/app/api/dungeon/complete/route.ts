@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
           characterId,
           {
             $inc: {
-              xp: completionXP,
+              experience: completionXP,
               gold: totalGold,
             },
           },
