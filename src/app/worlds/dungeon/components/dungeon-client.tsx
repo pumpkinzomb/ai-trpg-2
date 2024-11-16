@@ -1150,7 +1150,11 @@ export function DungeonClient() {
               <DungeonActionInput
                 value={userAction}
                 onChange={(value) => setUserAction(value)}
-                disabled={showCombat || dungeonState.stageCompleted}
+                disabled={
+                  showCombat ||
+                  (dungeonState.stageCompleted &&
+                    dungeonState.currentStage === dungeonState.maxStages - 1)
+                }
                 isLoading={loadingState.action}
                 onSubmit={handleActionSubmit}
               />
