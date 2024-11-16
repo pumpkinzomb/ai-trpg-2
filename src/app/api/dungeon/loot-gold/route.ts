@@ -61,38 +61,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 던전 상태 업데이트
-    const [updatedDungeon, character] = await Promise.all([
-      Dungeon.findOneAndUpdate(
-        {
-          _id: dungeonId,
-          "logs._id": logId,
-        },
-        {
-          $set: {
-            "logs.$.data.rewards.goldLooted": true,
-            "logs.$.data.rewards.gold": 0,
-          },
-        },
-        {
-          new: true,
-          session: mongoSession,
-          runValidators: true,
-        }
-      ),
-      Character.findByIdAndUpdate(
-        dungeon.characterId,
-        {
-          $inc: { gold: goldAmount },
-        },
-        {
-          new: true,
-          session: mongoSession,
-          select:
-            "name level class race hp profileImage inventory experience gold",
-        }
-      ),
+    // 먼저 캐릭터 업데이트
+    const character = await Character.findByIdAndUpdate(
+      dungeon.characterId,
+      {
+        $inc: { gold: goldAmount },
+      },
+      {
+        new: true,
+        session: mongoSession,
+        select: "-spells -arenaStats -proficiencies",
+      }
+    ).populate([
+      "inventory",
+      "equipment.weapon",
+      "equipment.armor",
+      "equipment.shield",
+      "equipment.accessories",
     ]);
+
+    // 그 다음 던전 업데이트
+    const updatedDungeon = await Dungeon.findOneAndUpdate(
+      {
+        _id: dungeonId,
+        "logs._id": logId,
+      },
+      {
+        $set: {
+          "logs.$.data.rewards.goldLooted": true,
+          "logs.$.data.rewards.gold": 0,
+          playerHP: character.hp.current,
+        },
+      },
+      {
+        new: true,
+        session: mongoSession,
+        runValidators: true,
+      }
+    );
 
     if (!updatedDungeon || !character) {
       throw new Error("Failed to update dungeon or character");

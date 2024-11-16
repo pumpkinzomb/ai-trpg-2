@@ -1,3 +1,4 @@
+import { ClientSession } from "mongoose";
 import {
   Crown,
   Swords,
@@ -6,7 +7,8 @@ import {
   Mountain,
   Scroll,
 } from "lucide-react";
-import { Character } from "../types";
+import { Character as CharacterType } from "../types";
+import { ICharacter } from "../models";
 
 export const calculateInitialHP = (
   characterClass: string,
@@ -30,11 +32,18 @@ export const calculateInitialHP = (
 
   return (
     classHitDice[characterClass as keyof typeof classHitDice] +
-    constitutionModifier
+    constitutionModifier +
+    5
   );
 };
 
 export const getHitDice = (characterClass: string) => {
+  // characterClass 유효성 검사
+  if (!characterClass) {
+    console.error("Character class is undefined or empty");
+    return "d8"; // 기본값 반환
+  }
+
   const hitDice = {
     barbarian: "d12",
     fighter: "d10",
@@ -50,8 +59,213 @@ export const getHitDice = (characterClass: string) => {
     wizard: "d6",
   };
 
-  return hitDice[characterClass as keyof typeof hitDice];
+  // 소문자로 변환하여 비교
+  const normalizedClass = characterClass.toLowerCase();
+  const diceType = hitDice[normalizedClass as keyof typeof hitDice];
+
+  if (!diceType) {
+    console.error(`Unknown character class: ${characterClass}`);
+    return "d8"; // 기본값 반환
+  }
+
+  return diceType;
 };
+
+const LEVEL_XP_REQUIREMENTS = [
+  0, // 레벨 1
+  1000, // 레벨 2
+  2000, // 레벨 3
+  3000, // 레벨 4
+  4000, // 레벨 5
+  5000, // 레벨 6
+  6000, // 레벨 7
+  7000, // 레벨 8
+  8000, // 레벨 9
+  9000, // 레벨 10
+  10000, // 레벨 11
+  11000, // 레벨 12
+  12000, // 레벨 13
+  13000, // 레벨 14
+  14000, // 레벨 15
+  15000, // 레벨 16
+  16000, // 레벨 17
+  17000, // 레벨 18
+  18000, // 레벨 19
+  19000, // 레벨 20
+];
+
+// Hit Dice 굴림 함수
+function rollHitDice(diceType: string): number {
+  const diceValue = parseInt(diceType.substring(1));
+  return Math.floor(Math.random() * diceValue) + 1;
+}
+
+// 능력치 랜덤 증가 함수
+function rollAbilityScoreIncrease(): { stat: string; increase: number } {
+  const stats = [
+    "strength",
+    "dexterity",
+    "constitution",
+    "intelligence",
+    "wisdom",
+    "charisma",
+  ];
+  const randomStat = stats[Math.floor(Math.random() * stats.length)];
+  const increase = Math.floor(Math.random() * 2) + 1; // 1 또는 2 증가
+  return { stat: randomStat, increase };
+}
+
+// HP 증가량 계산 함수
+function calculateHPIncrease(
+  characterClass: string,
+  constitutionMod: number
+): number {
+  const hitDice = getHitDice(characterClass);
+  const roll = rollHitDice(hitDice);
+  return roll + constitutionMod;
+}
+
+interface LevelUpResult {
+  level: number;
+  stats: {
+    strength: number;
+    dexterity: number;
+    constitution: number;
+    intelligence: number;
+    wisdom: number;
+    charisma: number;
+  };
+  hp: {
+    hitDice: string;
+    max: number;
+    current: number;
+  };
+  levelUpDetails: {
+    previousLevel: number;
+    newLevel: number;
+    abilityIncrease: {
+      stat: string;
+      amount: number;
+    };
+    hpIncrease: number;
+    hitDiceRoll: {
+      dice: string;
+      roll: number;
+      constitutionBonus: number;
+    };
+    nextLevelXP: number | null;
+  };
+}
+
+export function checkAndProcessLevelUp(
+  character: ICharacter
+): LevelUpResult | null {
+  const currentLevel = character.level;
+  const currentXP = character.experience;
+
+  // 최대 레벨 체크
+  if (currentLevel >= 20) {
+    return null;
+  }
+
+  // 다음 레벨업에 필요한 경험치 체크
+  const requiredXP = LEVEL_XP_REQUIREMENTS[currentLevel];
+  if (currentXP < requiredXP) {
+    return null;
+  }
+
+  const abilityIncrease = rollAbilityScoreIncrease();
+  const constitutionMod = Math.floor((character.stats.constitution - 10) / 2);
+
+  // HP 증가
+  const hpIncrease = calculateHPIncrease(character.class, constitutionMod);
+
+  return {
+    level: currentLevel + 1,
+    stats: {
+      strength:
+        character.stats.strength +
+        (abilityIncrease.stat === "strength" ? abilityIncrease.increase : 0),
+      dexterity:
+        character.stats.dexterity +
+        (abilityIncrease.stat === "dexterity" ? abilityIncrease.increase : 0),
+      constitution:
+        character.stats.constitution +
+        (abilityIncrease.stat === "constitution"
+          ? abilityIncrease.increase
+          : 0),
+      intelligence:
+        character.stats.intelligence +
+        (abilityIncrease.stat === "intelligence"
+          ? abilityIncrease.increase
+          : 0),
+      wisdom:
+        character.stats.wisdom +
+        (abilityIncrease.stat === "wisdom" ? abilityIncrease.increase : 0),
+      charisma:
+        character.stats.charisma +
+        (abilityIncrease.stat === "charisma" ? abilityIncrease.increase : 0),
+    },
+    hp: {
+      ...character.hp, // 기존 hp 객체의 모든 속성 유지 (hitDice 포함)
+      max: character.hp.max + hpIncrease,
+      current: character.hp.current + hpIncrease,
+    },
+    levelUpDetails: {
+      previousLevel: currentLevel,
+      newLevel: currentLevel + 1,
+      abilityIncrease: {
+        stat: abilityIncrease.stat,
+        amount: abilityIncrease.increase,
+      },
+      hpIncrease,
+      hitDiceRoll: {
+        dice: getHitDice(character.class),
+        roll: hpIncrease - constitutionMod,
+        constitutionBonus: constitutionMod,
+      },
+      nextLevelXP: LEVEL_XP_REQUIREMENTS[currentLevel + 1] || null,
+    },
+  };
+}
+
+export async function processCombatExperience(
+  character: ICharacter,
+  session?: ClientSession
+) {
+  try {
+    const levelUpResults = [];
+    let levelUpResult = await checkAndProcessLevelUp(character);
+
+    while (levelUpResult !== null) {
+      // 캐릭터 업데이트
+      character.level = levelUpResult.level;
+      character.hp = levelUpResult.hp;
+      character.stats = levelUpResult.stats;
+
+      levelUpResults.push(levelUpResult.levelUpDetails);
+
+      // 다음 레벨업 체크
+      levelUpResult = await checkAndProcessLevelUp(character);
+    }
+
+    // session이 제공된 경우 사용
+    if (session) {
+      await character.save({ session });
+    } else {
+      await character.save();
+    }
+
+    return {
+      newExperience: character.experience,
+      levelUps: levelUpResults.length > 0 ? levelUpResults : null,
+      nextLevelXP: LEVEL_XP_REQUIREMENTS[character.level] || null,
+    };
+  } catch (error) {
+    console.error("Error in processCombatExperience:", error);
+    throw error;
+  }
+}
 
 // 시작 골드 범위 (직업별 주사위)
 const STARTING_GOLD_DICE: Record<
@@ -85,7 +299,7 @@ export const getStartingGold = (characterClass: string): number => {
   }
 
   // 최종 금액 계산 (주사위 합계 × 배수)
-  return total * goldDice.multiplier;
+  return total * goldDice.multiplier + 300;
 };
 
 export const commonRaces = [
@@ -340,7 +554,7 @@ export const checkArmorClassRestriction = (
 
 // 클래스 특성이 AC에 영향을 미치는지 확인하는 함수
 const getACBonusFromFeatures = (
-  character: Character,
+  character: CharacterType,
   baseAC: number,
   hasArmor: boolean
 ): number => {
@@ -459,7 +673,7 @@ const getACBonusFromFeatures = (
 };
 
 // 종족 보너스 확인 함수
-const getACBonusFromRace = (character: Character): number => {
+const getACBonusFromRace = (character: CharacterType): number => {
   let bonus = 0;
 
   switch (character.race.toLowerCase()) {
@@ -483,7 +697,7 @@ const getACBonusFromRace = (character: Character): number => {
 };
 
 // 개선된 AC 계산 함수
-export const calculatePlayerAC = (character?: Character): number => {
+export const calculatePlayerAC = (character?: CharacterType): number => {
   if (!character) return 10;
 
   const dexMod = Math.floor((character.stats.dexterity - 10) / 2);
@@ -495,6 +709,7 @@ export const calculatePlayerAC = (character?: Character): number => {
   let armorBonus = 0;
   let shieldBonus = 0;
 
+  console.log("calculatePlayerAC character", character);
   const hasArmor = !!character.equipment.armor;
 
   // 자연 방어구 처리 (종족 특성)

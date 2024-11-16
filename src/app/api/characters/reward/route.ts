@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Character } from "@/app/models";
+import mongoose from "mongoose";
+import { processCombatExperience } from "@/app/utils/character";
 
 interface RewardPayload {
   characterId: string;
@@ -10,6 +12,9 @@ interface RewardPayload {
 }
 
 export async function POST(req: NextRequest) {
+  const mongoSession = await mongoose.startSession();
+  mongoSession.startTransaction();
+
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -35,7 +40,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 캐릭터 확인
-    const character = await Character.findById(characterId);
+    const character = await Character.findById(characterId).session(
+      mongoSession
+    );
     if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
@@ -55,14 +62,13 @@ export async function POST(req: NextRequest) {
     character.gold += gold;
     character.experience += experience;
 
-    // 레벨업 체크 로직 (예시: 1000 경험치당 레벨업)
-    const expForLevelUp = character.level * 1000;
-    if (character.experience >= expForLevelUp) {
-      character.level += 1;
-      character.experience -= expForLevelUp;
-    }
+    // 레벨업 체크 및 처리
+    const experienceResult = await processCombatExperience(
+      character,
+      mongoSession
+    );
 
-    await character.save();
+    await mongoSession.commitTransaction();
 
     return NextResponse.json({
       success: true,
@@ -74,13 +80,22 @@ export async function POST(req: NextRequest) {
         level: character.level,
         experience: character.experience,
       },
-      levelUp: character.experience >= expForLevelUp,
+      levelUp: experienceResult.levelUps
+        ? {
+            levelsGained: experienceResult.levelUps.length,
+            details: experienceResult.levelUps,
+            nextLevelXP: experienceResult.nextLevelXP,
+          }
+        : null,
     });
   } catch (error) {
+    await mongoSession.abortTransaction();
     console.error("Character reward error:", error);
     return NextResponse.json(
       { error: "Failed to process reward" },
       { status: 500 }
     );
+  } finally {
+    await mongoSession.endSession();
   }
 }

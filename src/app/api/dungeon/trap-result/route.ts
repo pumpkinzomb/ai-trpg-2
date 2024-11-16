@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Dungeon, Character } from "@/app/models";
 import { DungeonLog } from "@/app/types";
+import mongoose from "mongoose";
+import { processCombatExperience } from "@/app/utils/character";
 
 interface TrapResult {
   success: boolean;
@@ -11,36 +13,49 @@ interface TrapResult {
 }
 
 export async function POST(req: NextRequest) {
+  const mongoSession = await mongoose.startSession();
+  mongoSession.startTransaction();
+
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { dungeonId, logId, result } = (await req.json()) as {
+    const { dungeonId, logId, result, characterId } = (await req.json()) as {
       dungeonId: string;
+      characterId: string;
       logId: string;
       result: TrapResult;
     };
 
-    if (!dungeonId || !logId || !result) {
+    if (!dungeonId || !logId || !characterId || !result) {
       return NextResponse.json(
-        { error: "dungeonId, logId and result are required" },
+        { error: "dungeonId, characterId, logId and result are required" },
         { status: 400 }
       );
     }
 
-    const dungeon = await Dungeon.findById(dungeonId);
+    const [dungeon, character] = await Promise.all([
+      Dungeon.findById(dungeonId).session(mongoSession),
+      Character.findById(characterId)
+        .select("-spells -arenaStats -proficiencies")
+        .populate([
+          "inventory",
+          "equipment.weapon",
+          "equipment.armor",
+          "equipment.shield",
+          "equipment.accessories",
+        ])
+        .session(mongoSession),
+    ]);
+
     if (!dungeon || !dungeon.active) {
       return NextResponse.json(
         { error: "Active dungeon not found" },
         { status: 404 }
       );
     }
-
-    const character = await Character.findById(dungeon.characterId).select(
-      "name level class race hp profileImage inventory experience gold"
-    );
 
     if (!character) {
       return NextResponse.json(
@@ -78,13 +93,26 @@ export async function POST(req: NextRequest) {
         : currentLog.data.trap.outcomes.failure.description,
     };
 
-    // HP 업데이트
-    const newHP = Math.max(0, dungeon.playerHP - damage);
-    dungeon.playerHP = newHP;
-
     // 로그 업데이트
     dungeon.logs[logIndex] = currentLog;
 
+    // 경험치 보상 (함정 난이도에 따라)
+    const trapXP = success
+      ? Math.floor(currentLog.data.trap.dc * 10) // 성공 시 더 많은 경험치
+      : Math.floor(currentLog.data.trap.dc * 5); // 실패해도 약간의 경험치
+
+    character.experience += trapXP;
+
+    // 레벨업 체크 및 처리
+    const experienceResult = await processCombatExperience(
+      character,
+      mongoSession
+    );
+
+    // HP 업데이트 - 레벨업으로 인한 HP 증가를 고려
+    const newHP = Math.max(0, character.hp.current - damage);
+
+    // 던전 업데이트
     const updatedDungeon = await Dungeon.findByIdAndUpdate(
       dungeonId,
       {
@@ -93,8 +121,12 @@ export async function POST(req: NextRequest) {
           logs: dungeon.logs,
         },
       },
-      { new: true }
+      {
+        new: true,
+        session: mongoSession,
+      }
     );
+    await mongoSession.commitTransaction();
 
     return NextResponse.json({
       success: true,
@@ -111,12 +143,23 @@ export async function POST(req: NextRequest) {
           ? currentLog.data.trap.outcomes.success.description
           : currentLog.data.trap.outcomes.failure.description,
       },
+      experienceGained: trapXP,
+      levelUp: experienceResult.levelUps
+        ? {
+            levelsGained: experienceResult.levelUps.length,
+            details: experienceResult.levelUps,
+            nextLevelXP: experienceResult.nextLevelXP,
+          }
+        : null,
     });
   } catch (error) {
+    await mongoSession.abortTransaction();
     console.error("Trap result error:", error);
     return NextResponse.json(
       { error: "Failed to process trap result" },
       { status: 500 }
     );
+  } finally {
+    await mongoSession.endSession();
   }
 }

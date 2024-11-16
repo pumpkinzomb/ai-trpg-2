@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import mongoose from "mongoose";
 import { authOptions } from "@/lib/auth";
 import { Dungeon, Character } from "@/app/models";
 import { DungeonLog, Item, UsedItem } from "@/app/types";
+import { processCombatExperience } from "@/app/utils/character";
 
 interface CombatResult {
   victory: boolean;
@@ -11,6 +13,9 @@ interface CombatResult {
 }
 
 export async function POST(req: NextRequest) {
+  const mongoSession = await mongoose.startSession();
+  mongoSession.startTransaction();
+
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -31,10 +36,10 @@ export async function POST(req: NextRequest) {
     }
 
     const [dungeon, character] = await Promise.all([
-      Dungeon.findById(dungeonId),
-      Character.findById(characterId).populate<{ inventory: Item[] }>(
-        "inventory"
-      ),
+      Dungeon.findById(dungeonId).session(mongoSession),
+      Character.findById(characterId)
+        .populate<{ inventory: Item[] }>("inventory")
+        .session(mongoSession),
     ]);
 
     if (!dungeon || !dungeon.active) {
@@ -130,15 +135,22 @@ export async function POST(req: NextRequest) {
 
     // 캐릭터 업데이트
     character.experience += totalExperienceGain;
+    await processCombatExperience(character, mongoSession);
 
     console.log("check character", character);
+
     // 변경사항 저장
     const [savedCharacter, updatedDungeon] = await Promise.all([
-      character
-        .save()
-        .select(
-          "name level class race hp profileImage inventory experience gold"
-        ),
+      Character.findById(character._id)
+        .select("-spells -arenaStats -proficiencies")
+        .populate([
+          "inventory",
+          "equipment.weapon",
+          "equipment.armor",
+          "equipment.shield",
+          "equipment.accessories",
+        ])
+        .session(mongoSession),
       Dungeon.findByIdAndUpdate(
         dungeonId,
         {
@@ -149,9 +161,12 @@ export async function POST(req: NextRequest) {
         },
         {
           new: true,
+          session: mongoSession,
         }
       ).populate("temporaryInventory.itemId"),
     ]);
+
+    await mongoSession.commitTransaction();
 
     return NextResponse.json({
       success: true,
@@ -168,10 +183,13 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
+    await mongoSession.abortTransaction();
     console.error("Combat result error:", error);
     return NextResponse.json(
       { error: "Failed to process combat result" },
       { status: 500 }
     );
+  } finally {
+    await mongoSession.endSession();
   }
 }

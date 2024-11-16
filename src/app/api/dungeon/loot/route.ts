@@ -73,26 +73,39 @@ export async function POST(req: NextRequest) {
     };
 
     // 업데이트 수행
-    const [character, updatedDungeon] = await Promise.all([
-      Character.findByIdAndUpdate(
-        dungeon.characterId,
-        {
-          $push: { inventory: itemObjectId },
-        },
-        {
-          new: true,
-          session: mongoSession,
-          runValidators: true,
-          select:
-            "name level class race hp profileImage inventory experience gold",
-        }
-      ),
-      Dungeon.findByIdAndUpdate(dungeonId, updateQuery, {
+    const character = await Character.findByIdAndUpdate(
+      dungeon.characterId,
+      {
+        $push: { inventory: itemObjectId },
+      },
+      {
         new: true,
         session: mongoSession,
         runValidators: true,
-      }),
+        select: "-spells -arenaStats -proficiencies",
+      }
+    ).populate([
+      "inventory",
+      "equipment.weapon",
+      "equipment.armor",
+      "equipment.shield",
+      "equipment.accessories",
     ]);
+
+    const updatedDungeon = await Dungeon.findByIdAndUpdate(
+      dungeonId,
+      {
+        ...updateQuery,
+        $set: {
+          playerHP: character.hp.current,
+        },
+      },
+      {
+        new: true,
+        session: mongoSession,
+        runValidators: true,
+      }
+    );
 
     if (!updatedDungeon) {
       throw new Error("Failed to update dungeon");

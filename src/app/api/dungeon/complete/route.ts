@@ -5,8 +5,12 @@ import { Character, Dungeon } from "@/app/models";
 import mongoose from "mongoose";
 import { calculateCompletionXP } from "@/app/utils/xpCalculator";
 import { handleDungeonItems } from "@/app/utils/dungeonItems";
+import { processCombatExperience } from "@/app/utils/character";
 
 export async function POST(req: NextRequest) {
+  const mongoSession = await mongoose.startSession();
+  mongoSession.startTransaction();
+
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -22,7 +26,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const dungeon = await Dungeon.findById(dungeonId);
+    const [dungeon, character] = await Promise.all([
+      Dungeon.findById(dungeonId).session(mongoSession),
+      Character.findById(characterId).session(mongoSession),
+    ]);
+
     if (!dungeon || !dungeon.active) {
       return NextResponse.json(
         { error: "Active dungeon not found" },
@@ -30,7 +38,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 마지막 스테이지 확인
     if (dungeon.currentStage !== dungeon.maxStages - 1) {
       return NextResponse.json(
         { error: "Cannot complete dungeon before reaching final stage" },
@@ -38,7 +45,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const character = await Character.findById(characterId);
     if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
@@ -59,84 +65,82 @@ export async function POST(req: NextRequest) {
 
     // 완료 보너스 계산
     const bonusGold = Math.floor(
-      unclaimedGold * 0.1 + // 기본 수집 골드의 10% 보너스
-        dungeon.maxStages * 50 + // 스테이지당 50 골드
-        (dungeon.recommendedLevel > character.level ? 200 : 100) // 높은 레벨 던전 추가 보너스
+      unclaimedGold * 0.1 +
+        dungeon.maxStages * 50 +
+        (dungeon.recommendedLevel > character.level ? 200 : 100)
     );
 
     const totalGold = unclaimedGold + bonusGold;
 
-    // 트랜잭션 시작
-    const dbSession = await mongoose.startSession();
-    try {
-      await dbSession.withTransaction(async () => {
-        // 던전 상태 업데이트
-        await Dungeon.findByIdAndUpdate(
-          dungeonId,
-          {
-            active: false,
-            status: "completed",
-            completedAt: new Date(),
-            rewards: {
-              xp: completionXP,
-              gold: totalGold,
-              bonusGold: bonusGold,
-            },
-            "logs.$[].data.rewards.goldLooted": true,
-          },
-          { session: dbSession }
-        );
+    // 캐릭터 경험치 추가
+    character.experience += completionXP;
+    character.gold += totalGold;
 
-        // 캐릭터 상태 업데이트
-        await Character.findByIdAndUpdate(
-          characterId,
-          {
-            $inc: {
-              experience: completionXP,
-              gold: totalGold,
-            },
-          },
-          { session: dbSession }
-        );
+    // 레벨업 처리
+    const experienceResult = await processCombatExperience(
+      character,
+      mongoSession
+    );
 
-        // 인벤토리 처리 (완료 시 모든 아이템 보존)
-        await handleDungeonItems(dungeon, character, "complete", dbSession);
-      });
-
-      // 레벨업 체크를 위한 캐릭터 다시 조회
-      const updatedCharacter = await Character.findById(characterId);
-      const leveledUp = updatedCharacter?.level > character.level;
-
-      return NextResponse.json({
-        success: true,
-        message: "Successfully completed dungeon",
+    // 던전 상태 업데이트
+    await Dungeon.findByIdAndUpdate(
+      dungeonId,
+      {
+        active: false,
+        status: "completed",
+        completedAt: new Date(),
         rewards: {
           xp: completionXP,
           gold: totalGold,
-          breakdown: {
-            baseGold: unclaimedGold,
-            bonusGold: bonusGold,
-          },
-          items: dungeon.temporaryInventory.length,
+          bonusGold: bonusGold,
         },
-        progress: {
-          currentStage: dungeon.currentStage,
-          maxStages: dungeon.maxStages,
-          recommendedLevel: dungeon.recommendedLevel,
-          playerLevel: character.level,
-          leveledUp,
+        "logs.$[].data.rewards.goldLooted": true,
+        playerHP: character.hp.current,
+      },
+      {
+        new: true,
+        session: mongoSession,
+      }
+    );
+
+    // 인벤토리 처리
+    await handleDungeonItems(dungeon, character, "complete", mongoSession);
+
+    // 최종 캐릭터 상태 조회
+    const savedCharacter = await Character.findById(character._id).session(
+      mongoSession
+    );
+
+    await mongoSession.commitTransaction();
+
+    return NextResponse.json({
+      success: true,
+      message: "Successfully completed dungeon",
+      rewards: {
+        xp: completionXP,
+        gold: totalGold,
+        breakdown: {
+          baseGold: unclaimedGold,
+          bonusGold: bonusGold,
         },
-      });
-    } catch (transactionError) {
-      console.error("Transaction error:", transactionError);
-      return NextResponse.json(
-        { error: "Failed to update dungeon and character status" },
-        { status: 500 }
-      );
-    } finally {
-      await dbSession.endSession();
-    }
+        items: dungeon.temporaryInventory.length,
+      },
+      progress: {
+        currentStage: dungeon.currentStage,
+        maxStages: dungeon.maxStages,
+        recommendedLevel: dungeon.recommendedLevel,
+        playerLevel: savedCharacter.level,
+      },
+      levelUp: experienceResult.levelUps
+        ? {
+            levelsGained: experienceResult.levelUps.length,
+            details: experienceResult.levelUps,
+            nextLevelXP: experienceResult.nextLevelXP,
+          }
+        : null,
+    });
   } catch (error) {
+    await mongoSession.abortTransaction();
     console.error("Dungeon completion error:", error);
     return NextResponse.json(
       {
@@ -145,10 +149,7 @@ export async function POST(req: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    await mongoSession.endSession();
   }
 }
-
-// 던전 완료의 특징:
-// 1. 모든 아이템 보존
-// 2. 풍부한 보상 (기본 골드 + 보너스)
-// 3. 레벨업 체크

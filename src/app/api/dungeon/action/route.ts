@@ -11,6 +11,27 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const getKeyOutcomes = (log: DungeonLog) => {
+  let outcomes = [];
+  if (log.effects?.hpChange)
+    outcomes.push(`체력 변화: ${log.effects.hpChange}`);
+  if (log.data?.combat?.resolution)
+    outcomes.push(
+      `전투 결과: ${log.data.combat.resolution.victory ? "승리" : "패배"}`
+    );
+  if (log.data?.rewards?.items?.length)
+    outcomes.push(`획득 아이템: ${log.data.rewards.items.length}개`);
+  return outcomes.join(", ");
+};
+
+const getPhaseGuidelines = (currentStage: number, maxStages: number) => {
+  if (currentStage === 0)
+    return "- 던전의 분위기와 특성을 잘 전달하고 플레이어의 호기심을 자극하세요\n- 초반부터 너무 위험한 상황은 피하되, 긴장감은 유지하세요";
+  if (currentStage === maxStages - 1)
+    return "- 이전 스테이지의 복선을 회수하고, 이 던전의 하이라이트가 될 만한 결말을 준비하세요\n- 최종 보스는 이전 진행과 연관된 의미있는 존재로 설정하세요";
+  return "- 플레이어의 행동에 따라 유동적으로 대응하되, 전체적인 스토리 흐름을 유지하세요\n- 다음 스테이지를 암시하는 요소들을 포함하세요";
+};
+
 const getDefaultXP = (character: ICharacter, difficulty: any, type: string) => {
   const baseXP = Math.floor(character.level * 90);
   const multiplier =
@@ -23,6 +44,31 @@ const getDefaultXP = (character: ICharacter, difficulty: any, type: string) => {
       : 0.2;
 
   return Math.floor(baseXP * multiplier * difficulty.rewards.xpMultiplier);
+};
+
+const analyzeCurrentStage = (logs: any[]) => {
+  const currentStageLogs = logs.filter((log) => !log.effects?.stageProgress);
+  const combatCompleted = currentStageLogs.some(
+    (log) => log.type === "combat" && log.data?.combat?.resolution?.victory
+  );
+  const trapCompleted = currentStageLogs.some(
+    (log) => log.type === "trap" && log.data?.trap?.resolved
+  );
+  const significantStory = currentStageLogs.some((log) => log.type === "story");
+
+  return `
+  Current stage encounters:
+  - Total encounters: ${currentStageLogs.length}
+  - Major combat completed: ${combatCompleted ? "Yes" : "No"}
+  - Significant puzzle/trap solved: ${trapCompleted ? "Yes" : "No"}
+  - Story milestone reached: ${significantStory ? "Yes" : "No"}
+  - Ready for progression: ${
+    currentStageLogs.length >= 2 &&
+    (combatCompleted || trapCompleted || significantStory)
+      ? "Yes"
+      : "No"
+  }
+  `;
 };
 
 const getDifficultyLevel = (
@@ -113,9 +159,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const character = await Character.findById(dungeon.characterId).select(
-      "name level class race hp profileImage inventory experience gold"
-    );
+    const character = await Character.findById(dungeon.characterId)
+      .select("-spells -arenaStats -proficiencies")
+      .populate([
+        "inventory",
+        "equipment.weapon",
+        "equipment.armor",
+        "equipment.shield",
+        "equipment.accessories",
+      ]);
 
     if (!character) {
       return NextResponse.json(
@@ -138,74 +190,77 @@ export async function POST(req: NextRequest) {
       dungeon.maxStages
     );
 
-    // 개선된 프롬프트
     const prompt = `
   Based on the following D&D 5e dungeon context and player action, generate the next scene.
   IMPORTANT: 
-  - All descriptions, names, and text should be in Korean language
-  - BUT 'imagePrompt' must be in English for image generation
+  - All descriptions and texts must be in Korean EXCEPT for imagePrompt
   
   Current dungeon: ${dungeon.dungeonName}
   Current Concept: ${dungeon.concept}
   Current stage: ${dungeon.currentStage + 1}/${dungeon.maxStages}
-  Previous encounters: ${dungeon.logs
-    .slice(-3)
-    .map((log: DungeonLog) => log.type)
-    .join(", ")}
   
-  PACING GUIDELINES:
-  - Stage should progress after 2-3 significant encounters
-  - Avoid consecutive encounters of the same type
-  - If last 3 encounters were combat, force a different type
-  - Current stage must progress if: combat victory AND no combat in next stage OR successful trap/puzzle completion
-  
-  ENCOUNTER VARIETY:
-  - Combat (35%): Varied enemies with different abilities
-  - Traps/Puzzles (25%): Require different skill checks
-  - Treasure Rooms (20%): After significant challenges
-  - Story/Exploration (15%): Advance plot and provide lore
-  - Rest (5%): When player HP below 70%
-  
-  REWARD DISTRIBUTION:
-  Combat Victory: 
-  - Gold: ${Math.floor(character.level * 10)} - ${Math.floor(
-      character.level * 20
-    )}
-  - Items: 40% chance
-  - XP: ${Math.floor(character.level * 15)}
-  
-  Trap Success:
-  - Gold: ${Math.floor(character.level * 5)} - ${Math.floor(
-      character.level * 15
-    )}
-  - Items: 30% chance
-  - XP: ${Math.floor(character.level * 10)}
-  
-  Treasure Room:
-  - Gold: ${Math.floor(character.level * 20)} - ${Math.floor(
-      character.level * 40
-    )}
-  - Items: 100% chance
-  - XP: ${Math.floor(character.level * 5)}
-  
-  Difficulty settings:
-  - Enemy levels should be around level ${
-    difficulty.combatDifficulty.enemyLevel
+  NARRATIVE CONTEXT:
+  Current Phase: ${
+    dungeon.currentStage === 0
+      ? "던전 도입부"
+      : dungeon.currentStage === dungeon.maxStages - 1
+      ? "최종 결전"
+      : dungeon.currentStage < dungeon.maxStages / 2
+      ? "탐험 초반"
+      : "클라이맥스 준비"
   }
-  - Encounter size: ${difficulty.combatDifficulty.enemyCount} enemies
-  - Trap DC base: ${difficulty.trapDifficulty.dcBase}
-  - Trap damage: ${difficulty.trapDifficulty.damageDice}
+  
+  Previous Events (Last 3 encounters for context):
+  ${dungeon.logs
+    .slice(-3)
+    .map(
+      (log: DungeonLog, index: number) => `
+    ${index + 1}. Type: ${log.type}
+    Description: ${log.description}
+    Key Outcomes: ${getKeyOutcomes(log)}
+  `
+    )
+    .join("\n")}
+  
+  PLAYER INPUT:
+  Action: "${action}"
+  Context: Consider if this action relates to previous events or hints at player's intentions
+  
+  STORYTELLING GUIDELINES:
+  - Maintain narrative consistency with previous events
+  - Create meaningful consequences for player choices
+  - Build tension appropriately for current phase
   ${
     dungeon.currentStage === dungeon.maxStages - 1
-      ? "- This is a boss stage (1.5x difficulty multiplier)"
-      : ""
+      ? "- Create dramatic finale that references previous encounters and choices"
+      : "- Plant story seeds and foreshadow future challenges"
   }
+  - Respond naturally to unexpected player actions while keeping story coherent
+  
+  SCENE GENERATION FOCUS:
+  ${getPhaseGuidelines(dungeon.currentStage, dungeon.maxStages)}
+  
+  STAGE PROGRESSION:
+  - Early Stage (1-2): Introduction and setting establishment
+  - Middle Stages (3-4): Rising action and complications
+  - Final Stage (5): Climax and resolution
+  ${
+    dungeon.currentStage === dungeon.maxStages - 1
+      ? "- Create an epic finale that ties together previous events"
+      : "- Build tension and plant seeds for future encounters"
+  }
+
+  Player action: "${action}"
+
+  Remember to:
+  - Make each encounter feel consequential to the overall story
+  - React meaningfully to player choices
+  - Maintain consistent narrative threads
+  - Scale challenge and rewards appropriately to stage progression
   
   REWARD GUIDELINES:
   For combat encounters:
-  - Regular enemies may drop ${Math.floor(character.level * 10)} - ${Math.floor(
-      character.level * 20
-    )} gold
+  - Regular enemies may drop gold
   - Elite or boss enemies have higher chances for valuable items
   - XP rewards scale with enemy difficulty
 
@@ -227,6 +282,32 @@ export async function POST(req: NextRequest) {
   - Legendary: ${(difficulty.rewards.itemRarityChance.legendary * 100).toFixed(
     1
   )}%
+
+  STAGE PROGRESSION RULES:
+  Current encounters in stage: ${
+    dungeon.logs.filter((log: DungeonLog) => !log.effects?.stageProgress).length
+  }
+  Stage progress conditions:
+  - Combat: Victory in significant battle (especially against stage boss)
+  - Trap/Puzzle: Successfully overcome major challenge
+  - Story: Reach critical story point or make important decision
+  - Required encounters per stage: 2-3 significant encounters
+  
+  Stage should progress when:
+  1. Completed 2-3 significant encounters in current stage AND
+  2. Achieved one of the following:
+     - Won a major combat encounter
+     - Solved a significant puzzle/trap
+     - Reached important story milestone
+  3. OR reached a natural story progression point
+  
+  Current Stage Analysis:
+  ${analyzeCurrentStage(dungeon.logs)}
+  
+  Set "effects.stageProgress" to true when:
+  - Required encounters are completed
+  - A significant milestone is achieved
+  - The current scene provides a natural conclusion to the stage
   
   Scene type distribution (not strict):
   - Combat: 40%
@@ -234,8 +315,6 @@ export async function POST(req: NextRequest) {
   - Treasure: 20%
   - Story: 10%
   - Rest: 5%
-  
-  Player action: "${action}"
 
   Consider the following elements for scene generation:
   - All descriptions and texts must be in Korean EXCEPT for imagePrompt
@@ -420,6 +499,7 @@ export async function POST(req: NextRequest) {
     const image = await generateImage(result.imagePrompt);
 
     let rewardItems: Types.ObjectId[] = [];
+    console.log("result.data?.rewards?.items", result.data?.rewards?.items);
     if (result.data?.rewards?.items?.length > 0) {
       const items = await Promise.all(
         result.data.rewards.items.map(async (itemData: GenerationItem) => {

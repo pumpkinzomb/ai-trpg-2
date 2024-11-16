@@ -5,6 +5,7 @@ import { Character, Dungeon, Item } from "@/app/models";
 import mongoose from "mongoose";
 import { calculateFailureXP } from "@/app/utils/xpCalculator";
 import { handleDungeonItems } from "@/app/utils/dungeonItems";
+import { processCombatExperience } from "@/app/utils/character";
 
 // 탈출 페널티/보상 계산 함수
 async function calculateEscapePenalties(dungeon: any, character: any) {
@@ -72,6 +73,9 @@ async function calculateEscapePenalties(dungeon: any, character: any) {
 }
 
 export async function POST(req: NextRequest) {
+  const mongoSession = await mongoose.startSession();
+  mongoSession.startTransaction();
+
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -87,7 +91,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const dungeon = await Dungeon.findById(dungeonId);
+    const [dungeon, character] = await Promise.all([
+      Dungeon.findById(dungeonId).session(mongoSession),
+      Character.findById(characterId).session(mongoSession),
+    ]);
+
     if (!dungeon || !dungeon.active) {
       return NextResponse.json(
         { error: "Active dungeon not found" },
@@ -111,7 +119,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const character = await Character.findById(characterId);
     if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
@@ -128,83 +135,80 @@ export async function POST(req: NextRequest) {
       escapeResults.preservedGold - escapeResults.goldPenalty
     );
 
-    // 트랜잭션 시작
-    const dbSession = await mongoose.startSession();
-    try {
-      await dbSession.withTransaction(async () => {
-        // 던전 상태 업데이트
-        await Dungeon.findByIdAndUpdate(
-          dungeonId,
-          {
-            active: false,
-            status: "escaped",
-            completedAt: new Date(),
-            rewards: {
-              xp: escapeResults.xpReward,
-              gold: finalGold,
-            },
-            "logs.$[].data.rewards.goldLooted": true,
-          },
-          { session: dbSession }
-        );
+    // 캐릭터 경험치와 골드 업데이트
+    character.experience += escapeResults.xpReward;
+    character.gold += finalGold;
 
-        // 캐릭터 상태 업데이트
-        await Character.findByIdAndUpdate(
-          characterId,
-          {
-            $inc: {
-              experience: escapeResults.xpReward,
-              gold: finalGold,
-            },
-          },
-          { session: dbSession }
-        );
+    // 레벨업 체크 및 처리
+    const experienceResult = await processCombatExperience(
+      character,
+      mongoSession
+    );
 
-        // 인벤토리 처리
-        await handleDungeonItems(
-          dungeon,
-          character,
-          "escape",
-          dbSession,
-          escapeResults.savedItems
-        );
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "Successfully escaped from dungeon",
+    // 던전 상태 업데이트
+    await Dungeon.findByIdAndUpdate(
+      dungeonId,
+      {
+        active: false,
+        status: "escaped",
+        completedAt: new Date(),
         rewards: {
           xp: escapeResults.xpReward,
-          preservedGold: escapeResults.preservedGold,
-          finalGold: finalGold,
+          gold: finalGold,
         },
-        penalties: {
-          goldPenalty: escapeResults.goldPenalty,
-          lostItems: escapeResults.lostItems.length,
-        },
-        savedItems: escapeResults.savedItems.length,
-        progress: {
-          currentStage: dungeon.currentStage,
-          maxStages: dungeon.maxStages,
-          progressPercentage: Math.floor(
-            (dungeon.currentStage / dungeon.maxStages) * 100
-          ),
-        },
-      });
-    } catch (transactionError) {
-      console.error("Transaction error:", transactionError);
-      return NextResponse.json(
-        { error: "Failed to process dungeon escape" },
-        { status: 500 }
-      );
-    } finally {
-      await dbSession.endSession();
-    }
+        "logs.$[].data.rewards.goldLooted": true,
+        playerHP: 0,
+      },
+      { session: mongoSession }
+    );
+
+    // 인벤토리 처리
+    await handleDungeonItems(
+      dungeon,
+      character,
+      "escape",
+      mongoSession,
+      escapeResults.savedItems
+    );
+
+    await mongoSession.commitTransaction();
+
+    return NextResponse.json({
+      success: true,
+      message: "Successfully escaped from dungeon",
+      rewards: {
+        xp: escapeResults.xpReward,
+        preservedGold: escapeResults.preservedGold,
+        finalGold: finalGold,
+      },
+      penalties: {
+        goldPenalty: escapeResults.goldPenalty,
+        lostItems: escapeResults.lostItems.length,
+      },
+      savedItems: escapeResults.savedItems.length,
+      progress: {
+        currentStage: dungeon.currentStage,
+        maxStages: dungeon.maxStages,
+        progressPercentage: Math.floor(
+          (dungeon.currentStage / dungeon.maxStages) * 100
+        ),
+      },
+      levelUp: experienceResult.levelUps
+        ? {
+            levelsGained: experienceResult.levelUps.length,
+            details: experienceResult.levelUps,
+            nextLevelXP: experienceResult.nextLevelXP,
+          }
+        : null,
+    });
   } catch (error) {
+    await mongoSession.abortTransaction();
     console.error("Dungeon escape error:", error);
     return NextResponse.json(
       { error: "Failed to process dungeon escape" },
       { status: 500 }
     );
+  } finally {
+    await mongoSession.endSession();
   }
 }

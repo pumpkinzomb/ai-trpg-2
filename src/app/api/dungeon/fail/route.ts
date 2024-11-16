@@ -5,8 +5,12 @@ import { Character, Dungeon } from "@/app/models";
 import mongoose from "mongoose";
 import { calculateFailureXP } from "@/app/utils/xpCalculator";
 import { handleDungeonItems } from "@/app/utils/dungeonItems";
+import { processCombatExperience } from "@/app/utils/character";
 
 export async function POST(req: NextRequest) {
+  const mongoSession = await mongoose.startSession();
+  mongoSession.startTransaction();
+
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -22,7 +26,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const dungeon = await Dungeon.findById(dungeonId);
+    const [dungeon, character] = await Promise.all([
+      Dungeon.findById(dungeonId).session(mongoSession),
+      Character.findById(characterId).session(mongoSession),
+    ]);
+
     if (!dungeon || !dungeon.active) {
       return NextResponse.json(
         { error: "Active dungeon not found" },
@@ -30,7 +38,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const character = await Character.findById(characterId);
     if (!character) {
       return NextResponse.json(
         { error: "Character not found" },
@@ -48,77 +55,70 @@ export async function POST(req: NextRequest) {
       }
       return total;
     }, 0);
-    const preservedGold = Math.floor(unclaimedGold * 0.2); // 실패 시 20%만 보존
+    const preservedGold = Math.floor(unclaimedGold * 0.2);
 
-    console.log("failureXP", failureXP);
+    // 캐릭터 경험치와 골드 추가
+    character.experience += failureXP;
+    character.gold += preservedGold;
+    character.hp.current = 0; // HP를 0으로 설정
 
-    // 트랜잭션 시작
-    const dbSession = await mongoose.startSession();
-    try {
-      await dbSession.withTransaction(async () => {
-        // 던전 상태 업데이트
-        await Dungeon.findByIdAndUpdate(
-          dungeonId,
-          {
-            active: false,
-            status: "failed",
-            completedAt: new Date(),
-            rewards: {
-              xp: failureXP,
-              gold: preservedGold,
-            },
-            "logs.$[].data.rewards.goldLooted": true,
-          },
-          { session: dbSession }
-        );
+    // 레벨업 체크 및 처리
+    const experienceResult = await processCombatExperience(
+      character,
+      mongoSession
+    );
 
-        // 캐릭터 상태 업데이트
-        await Character.findByIdAndUpdate(
-          characterId,
-          {
-            $inc: {
-              experience: failureXP,
-              gold: preservedGold,
-            },
-            "hp.current": 0, // HP를 0으로 설정
-          },
-          { session: dbSession }
-        );
-
-        // 인벤토리 처리 (실패 시 모든 아이템 손실)
-        await handleDungeonItems(dungeon, character, "fail", dbSession);
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "Dungeon failed",
+    // 던전 상태 업데이트
+    await Dungeon.findByIdAndUpdate(
+      dungeonId,
+      {
+        active: false,
+        status: "failed",
+        completedAt: new Date(),
         rewards: {
           xp: failureXP,
-          preservedGold,
+          gold: preservedGold,
         },
-        progress: {
-          currentStage: dungeon.currentStage,
-          maxStages: dungeon.maxStages,
-          progressPercentage: Math.floor(
-            (dungeon.currentStage / dungeon.maxStages) * 100
-          ),
-        },
-        lostItems: dungeon.temporaryInventory.length, // 손실된 아이템 수
-        status: {
-          hp: 0,
-          needsHealing: true,
-        },
-      });
-    } catch (transactionError) {
-      console.error("Transaction error:", transactionError);
-      return NextResponse.json(
-        { error: "Failed to process dungeon failure" },
-        { status: 500 }
-      );
-    } finally {
-      await dbSession.endSession();
-    }
+        "logs.$[].data.rewards.goldLooted": true,
+        playerHP: 0,
+      },
+      { session: mongoSession }
+    );
+
+    // 인벤토리 처리 (실패 시 모든 아이템 손실)
+    await handleDungeonItems(dungeon, character, "fail", mongoSession);
+
+    await mongoSession.commitTransaction();
+
+    return NextResponse.json({
+      success: true,
+      message: "Dungeon failed",
+      rewards: {
+        xp: failureXP,
+        preservedGold,
+      },
+      progress: {
+        currentStage: dungeon.currentStage,
+        maxStages: dungeon.maxStages,
+        progressPercentage: Math.floor(
+          (dungeon.currentStage / dungeon.maxStages) * 100
+        ),
+      },
+      lostItems: dungeon.temporaryInventory.length,
+      status: {
+        hp: 0,
+        needsHealing: true,
+      },
+      levelUp: experienceResult.levelUps
+        ? {
+            levelsGained: experienceResult.levelUps.length,
+            details: experienceResult.levelUps,
+            nextLevelXP: experienceResult.nextLevelXP,
+          }
+        : null,
+    });
   } catch (error) {
+    await mongoSession.abortTransaction();
     console.error("Dungeon fail error:", error);
     return NextResponse.json(
       {
@@ -127,11 +127,7 @@ export async function POST(req: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    await mongoSession.endSession();
   }
 }
-
-// 실패 시 특징:
-// 1. 모든 임시 아이템 손실
-// 2. HP가 0이 됨
-// 3. 미수령 골드의 20%만 보존
-// 4. 진행도에 따른 경험치 보상

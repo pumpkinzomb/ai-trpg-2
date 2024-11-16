@@ -631,6 +631,7 @@ export function DungeonClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dungeonId: dungeonState._id.toString(),
+          characterId: selectedCharacter._id.toString(),
           logId: currentLog._id.toString(),
           result: {
             success: result.success,

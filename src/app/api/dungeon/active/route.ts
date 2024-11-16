@@ -22,9 +22,15 @@ export async function GET(req: NextRequest) {
 
     // 캐릭터 확인
     const [character, activeDungeon] = await Promise.all([
-      Character.findById(characterId).select(
-        "name level class race hp profileImage inventory experience gold"
-      ),
+      Character.findById(characterId)
+        .select("-spells -arenaStats -proficiencies")
+        .populate([
+          "inventory",
+          "equipment.weapon",
+          "equipment.armor",
+          "equipment.shield",
+          "equipment.accessories",
+        ]),
       Dungeon.findOne({
         characterId,
         active: true,
