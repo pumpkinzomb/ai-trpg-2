@@ -13,8 +13,7 @@ interface CombatResult {
 }
 
 export async function POST(req: NextRequest) {
-  const mongoSession = await mongoose.startSession();
-  mongoSession.startTransaction();
+  let mongoSession = null;
 
   try {
     const session = await getServerSession(authOptions);
@@ -35,161 +34,180 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [dungeon, character] = await Promise.all([
-      Dungeon.findById(dungeonId).session(mongoSession),
-      Character.findById(characterId)
-        .populate<{ inventory: Item[] }>("inventory")
-        .session(mongoSession),
-    ]);
+    mongoSession = await mongoose.startSession();
+    const transactionResult = await mongoSession.withTransaction(
+      async (session) => {
+        // Find documents within transaction
+        const [dungeon, character] = await Promise.all([
+          Dungeon.findById(dungeonId).session(session),
+          Character.findById(characterId)
+            .populate<{ inventory: Item[] }>("inventory")
+            .session(session),
+        ]);
 
-    if (!dungeon || !dungeon.active) {
-      return NextResponse.json(
-        { error: "Active dungeon not found" },
-        { status: 404 }
-      );
-    }
-
-    if (!character) {
-      return NextResponse.json(
-        { error: "Character not found" },
-        { status: 404 }
-      );
-    }
-
-    const currentLog: DungeonLog = dungeon.logs[dungeon.logs.length - 1];
-    if (!currentLog || !currentLog.data?.enemies) {
-      return NextResponse.json(
-        { error: "No active combat found" },
-        { status: 400 }
-      );
-    }
-
-    const { victory, remainingHp, usedItems } = result;
-
-    let baseXP = 0;
-    let bonusXP = 0;
-    let totalExperienceGain = 0;
-
-    console.log("usedItems", usedItems);
-
-    // 전투 결과에 따른 적 HP 및 플레이어 HP 업데이트
-    if (victory) {
-      currentLog.data.enemies = currentLog.data.enemies.map((enemy) => ({
-        ...enemy,
-        hp: 0,
-      }));
-      baseXP = currentLog.data.rewards?.xp || 0;
-      bonusXP = currentLog.data.enemies.reduce((total, enemy) => {
-        const levelDiff = Math.max(0, enemy.level - character.level);
-        return total + levelDiff * 50;
-      }, 0);
-      totalExperienceGain = baseXP + bonusXP;
-      dungeon.playerHP = remainingHp;
-    } else {
-      // 패배 시 적 HP는 현재 상태 유지
-      dungeon.playerHP = 0;
-      totalExperienceGain = Math.floor(
-        (currentLog.data.rewards?.xp || 0) * 0.3
-      );
-      baseXP = totalExperienceGain;
-      bonusXP = 0;
-    }
-
-    // 전투 resolution 정보 업데이트
-    if (!currentLog.data.combat) {
-      currentLog.data.combat = {};
-    }
-
-    currentLog.data.combat.resolved = true;
-    currentLog.data.combat.resolution = {
-      victory,
-      usedItems,
-      experienceGained: victory ? totalExperienceGain : 0,
-      remainingHp: victory ? remainingHp : 0,
-    };
-
-    // 사용된 아이템 처리
-    if (usedItems?.length > 0) {
-      const itemUsageCount = new Map<string, number>();
-
-      // 각 아이템 ID별 사용 횟수 계산
-      usedItems.forEach((usedItem) => {
-        const count = itemUsageCount.get(usedItem.itemId) || 0;
-        itemUsageCount.set(usedItem.itemId, count + 1);
-      });
-
-      const updatedInventory = character.inventory.reduce(
-        (acc: Item[], item: Item) => {
-          const usedCount = itemUsageCount.get(item._id.toString()) || 0;
-          if (usedCount === 0) {
-            // 사용되지 않은 아이템은 그대로 유지
-            acc.push(item);
-          }
-          return acc;
-        },
-        []
-      );
-
-      character.inventory = updatedInventory;
-    }
-
-    // 캐릭터 업데이트
-    character.experience += totalExperienceGain;
-    await processCombatExperience(character, mongoSession);
-
-    console.log("check character", character);
-
-    // 변경사항 저장
-    const [savedCharacter, updatedDungeon] = await Promise.all([
-      Character.findById(character._id)
-        .select("-spells -arenaStats -proficiencies")
-        .populate([
-          "inventory",
-          "equipment.weapon",
-          "equipment.armor",
-          "equipment.shield",
-          "equipment.accessories",
-        ])
-        .session(mongoSession),
-      Dungeon.findByIdAndUpdate(
-        dungeonId,
-        {
-          $set: {
-            playerHP: dungeon.playerHP,
-            logs: dungeon.logs,
-          },
-        },
-        {
-          new: true,
-          session: mongoSession,
+        if (!dungeon || !dungeon.active) {
+          throw new Error("Active dungeon not found");
         }
-      ).populate("temporaryInventory.itemId"),
-    ]);
 
-    await mongoSession.commitTransaction();
+        if (!character) {
+          throw new Error("Character not found");
+        }
 
-    return NextResponse.json({
-      success: true,
-      message: victory ? "Combat victory" : "Combat defeat",
-      dungeon: {
-        ...updatedDungeon.toObject(),
-        character: savedCharacter,
-      },
-      experienceGained: totalExperienceGain,
-      experienceBreakdown: {
-        baseXP,
-        bonusXP,
-        total: totalExperienceGain,
-      },
-    });
+        const currentLog: DungeonLog = dungeon.logs[dungeon.logs.length - 1];
+        if (!currentLog || !currentLog.data?.enemies) {
+          throw new Error("No active combat found");
+        }
+
+        const { victory, remainingHp, usedItems } = result;
+
+        let baseXP = 0;
+        let bonusXP = 0;
+        let totalExperienceGain = 0;
+
+        // Calculate experience gains
+        if (victory) {
+          currentLog.data.enemies = currentLog.data.enemies.map((enemy) => ({
+            ...enemy,
+            hp: 0,
+          }));
+          baseXP = currentLog.data.rewards?.xp || 0;
+          bonusXP = currentLog.data.enemies.reduce((total, enemy) => {
+            const levelDiff = Math.max(0, enemy.level - character.level);
+            return total + levelDiff * 50;
+          }, 0);
+          totalExperienceGain = baseXP + bonusXP;
+        } else {
+          totalExperienceGain = Math.floor(
+            (currentLog.data.rewards?.xp || 0) * 0.3
+          );
+          baseXP = totalExperienceGain;
+          bonusXP = 0;
+        }
+
+        // Update combat resolution
+        if (!currentLog.data.combat) {
+          currentLog.data.combat = {};
+        }
+
+        currentLog.data.combat.resolved = true;
+        currentLog.data.combat.resolution = {
+          victory,
+          usedItems,
+          experienceGained: victory ? totalExperienceGain : 0,
+          remainingHp: victory ? remainingHp : 0,
+        };
+
+        // Process used items
+        if (usedItems?.length > 0) {
+          const itemUsageCount = new Map<string, number>();
+
+          usedItems.forEach((usedItem) => {
+            const count = itemUsageCount.get(usedItem.itemId) || 0;
+            itemUsageCount.set(usedItem.itemId, count + 1);
+          });
+
+          const updatedInventory = character.inventory.reduce(
+            (acc: Item[], item: Item) => {
+              const usedCount = itemUsageCount.get(item._id.toString()) || 0;
+              if (usedCount === 0) {
+                acc.push(item);
+              }
+              return acc;
+            },
+            []
+          );
+
+          character.inventory = updatedInventory;
+        }
+
+        // Update character experience
+        character.experience += totalExperienceGain;
+        const experienceResult = await processCombatExperience(
+          character,
+          session
+        );
+
+        // Handle HP updates
+        const didLevelUp =
+          experienceResult.levelUps && experienceResult.levelUps.length > 0;
+
+        let newHP;
+        if (victory) {
+          if (didLevelUp) {
+            newHP = character.hp.max;
+          } else {
+            newHP = remainingHp;
+          }
+        } else {
+          newHP = 0;
+        }
+
+        dungeon.playerHP = newHP;
+
+        // Save changes within transaction
+        const [savedCharacter, updatedDungeon] = await Promise.all([
+          Character.findById(character._id)
+            .select("-spells -arenaStats -proficiencies")
+            .populate([
+              "inventory",
+              "equipment.weapon",
+              "equipment.armor",
+              "equipment.shield",
+              "equipment.accessories",
+            ])
+            .session(session),
+          Dungeon.findByIdAndUpdate(
+            dungeonId,
+            {
+              $set: {
+                playerHP: dungeon.playerHP,
+                logs: dungeon.logs,
+              },
+            },
+            {
+              new: true,
+              session,
+            }
+          ).populate("temporaryInventory.itemId"),
+        ]);
+
+        return {
+          success: true,
+          message: victory ? "Combat victory" : "Combat defeat",
+          dungeon: {
+            ...updatedDungeon.toObject(),
+            character: savedCharacter,
+          },
+          experienceGained: totalExperienceGain,
+          experienceBreakdown: {
+            baseXP,
+            bonusXP,
+            total: totalExperienceGain,
+          },
+          levelUp: experienceResult.levelUps
+            ? {
+                levelsGained: experienceResult.levelUps.length,
+                details: experienceResult.levelUps,
+                nextLevelXP: experienceResult.nextLevelXP,
+              }
+            : null,
+        };
+      }
+    );
+
+    return NextResponse.json(transactionResult);
   } catch (error) {
-    await mongoSession.abortTransaction();
     console.error("Combat result error:", error);
     return NextResponse.json(
-      { error: "Failed to process combat result" },
+      {
+        error: "Failed to process combat result",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 }
     );
   } finally {
-    await mongoSession.endSession();
+    if (mongoSession) {
+      await mongoSession.endSession();
+    }
   }
 }

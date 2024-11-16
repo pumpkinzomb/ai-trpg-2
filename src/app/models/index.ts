@@ -145,6 +145,7 @@ const itemSchema = new Schema(
         "shield",
         "accessory",
         "consumable",
+        "misc",
       ],
       required: true,
     },
@@ -483,7 +484,7 @@ interface ISpell extends Document {
   description: string;
 }
 
-interface IItem extends Document {
+export interface IItem extends Document {
   name: string;
   type:
     | "weapon"
@@ -492,7 +493,8 @@ interface IItem extends Document {
     | "heavy-armor"
     | "shield"
     | "accessory"
-    | "consumable";
+    | "consumable"
+    | "misc";
   rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
   stats: {
     damage?: string;

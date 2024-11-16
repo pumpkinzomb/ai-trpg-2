@@ -11,14 +11,12 @@ import { Crown, Package } from "lucide-react";
 
 interface EscapeResultsDialogProps {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
   results: EscapePenalties | null;
   onClose: () => void;
 }
 
 export function EscapeResultsDialog({
   open,
-  onOpenChange,
   results,
   onClose,
 }: EscapeResultsDialogProps) {
@@ -45,7 +43,7 @@ export function EscapeResultsDialog({
                 <Crown className="h-4 w-4 text-yellow-500" />
                 <span>{results.lostGold} Gold</span>
               </li>
-              {results.lostItems.map((item, index) => (
+              {results.lostItems?.map((item, index) => (
                 <li key={index} className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-red-500" />
                   <span>{item.name || "알 수 없는 아이템"}</span>
@@ -54,7 +52,7 @@ export function EscapeResultsDialog({
             </ul>
           </div>
 
-          {results.savedItems.length > 0 && (
+          {results.savedItems?.length > 0 && (
             <div className="p-4 bg-success/10 rounded-lg">
               <h4 className="font-semibold text-success mb-2">보존된 아이템</h4>
               <ul className="space-y-2">

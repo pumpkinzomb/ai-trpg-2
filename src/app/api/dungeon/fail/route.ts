@@ -8,8 +8,7 @@ import { handleDungeonItems } from "@/app/utils/dungeonItems";
 import { processCombatExperience } from "@/app/utils/character";
 
 export async function POST(req: NextRequest) {
-  const mongoSession = await mongoose.startSession();
-  mongoSession.startTransaction();
+  let mongoSession = null;
 
   try {
     const session = await getServerSession(authOptions);
@@ -26,99 +25,94 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [dungeon, character] = await Promise.all([
-      Dungeon.findById(dungeonId).session(mongoSession),
-      Character.findById(characterId).session(mongoSession),
-    ]);
+    // Start transaction
+    mongoSession = await mongoose.startSession();
+    await mongoSession.withTransaction(async (session) => {
+      // Find documents within transaction
+      const dungeon = await Dungeon.findById(dungeonId).session(session);
+      const character = await Character.findById(characterId).session(session);
 
-    if (!dungeon || !dungeon.active) {
-      return NextResponse.json(
-        { error: "Active dungeon not found" },
-        { status: 404 }
-      );
-    }
-
-    if (!character) {
-      return NextResponse.json(
-        { error: "Character not found" },
-        { status: 404 }
-      );
-    }
-
-    // 실패 보상 계산
-    const failureXP = calculateFailureXP(dungeon, character.level);
-
-    // 미수령 골드 계산 (보존율 20%)
-    const unclaimedGold = dungeon.logs.reduce((total: number, log: any) => {
-      if (log.data?.rewards?.gold && !log.data.rewards.goldLooted) {
-        return total + log.data.rewards.gold;
+      if (!dungeon || !dungeon.active) {
+        throw new Error("Active dungeon not found");
       }
-      return total;
-    }, 0);
-    const preservedGold = Math.floor(unclaimedGold * 0.2);
 
-    // 캐릭터 경험치와 골드 추가
-    character.experience += failureXP;
-    character.gold += preservedGold;
-    character.hp.current = 0; // HP를 0으로 설정
+      if (!character) {
+        throw new Error("Character not found");
+      }
 
-    // 레벨업 체크 및 처리
-    const experienceResult = await processCombatExperience(
-      character,
-      mongoSession
-    );
+      // Calculate failure rewards
+      const failureXP = calculateFailureXP(dungeon, character.level);
+      const unclaimedGold = dungeon.logs.reduce((total: number, log: any) => {
+        if (log.data?.rewards?.gold && !log.data.rewards.goldLooted) {
+          return total + log.data.rewards.gold;
+        }
+        return total;
+      }, 0);
+      const preservedGold = Math.floor(unclaimedGold * 0.2);
 
-    // 던전 상태 업데이트
-    await Dungeon.findByIdAndUpdate(
-      dungeonId,
-      {
-        active: false,
-        status: "failed",
-        completedAt: new Date(),
+      // Update character
+      character.experience += failureXP;
+      character.gold += preservedGold;
+      character.hp.current = 0;
+      await character.save({ session });
+
+      // Process combat experience
+      const experienceResult = await processCombatExperience(
+        character,
+        session
+      );
+
+      // Update dungeon
+      await Dungeon.findByIdAndUpdate(
+        dungeonId,
+        {
+          active: false,
+          status: "failed",
+          completedAt: new Date(),
+          rewards: {
+            xp: failureXP,
+            gold: preservedGold,
+          },
+          "logs.$[].data.rewards.goldLooted": true,
+          playerHP: 0,
+        },
+        { session }
+      );
+
+      // Handle inventory
+      await handleDungeonItems(dungeon, character, "fail", session);
+
+      return {
+        success: true,
+        message: "Dungeon failed",
         rewards: {
           xp: failureXP,
-          gold: preservedGold,
+          preservedGold,
         },
-        "logs.$[].data.rewards.goldLooted": true,
-        playerHP: 0,
-      },
-      { session: mongoSession }
-    );
-
-    // 인벤토리 처리 (실패 시 모든 아이템 손실)
-    await handleDungeonItems(dungeon, character, "fail", mongoSession);
-
-    await mongoSession.commitTransaction();
-
-    return NextResponse.json({
-      success: true,
-      message: "Dungeon failed",
-      rewards: {
-        xp: failureXP,
-        preservedGold,
-      },
-      progress: {
-        currentStage: dungeon.currentStage,
-        maxStages: dungeon.maxStages,
-        progressPercentage: Math.floor(
-          (dungeon.currentStage / dungeon.maxStages) * 100
-        ),
-      },
-      lostItems: dungeon.temporaryInventory.length,
-      status: {
-        hp: 0,
-        needsHealing: true,
-      },
-      levelUp: experienceResult.levelUps
-        ? {
-            levelsGained: experienceResult.levelUps.length,
-            details: experienceResult.levelUps,
-            nextLevelXP: experienceResult.nextLevelXP,
-          }
-        : null,
+        progress: {
+          currentStage: dungeon.currentStage,
+          maxStages: dungeon.maxStages,
+          progressPercentage: Math.floor(
+            (dungeon.currentStage / dungeon.maxStages) * 100
+          ),
+        },
+        lostItems: dungeon.temporaryInventory.length,
+        status: {
+          hp: 0,
+          needsHealing: true,
+        },
+        levelUp: experienceResult.levelUps
+          ? {
+              levelsGained: experienceResult.levelUps.length,
+              details: experienceResult.levelUps,
+              nextLevelXP: experienceResult.nextLevelXP,
+            }
+          : null,
+      };
     });
+
+    return NextResponse.json(mongoSession.transaction);
   } catch (error) {
-    await mongoSession.abortTransaction();
     console.error("Dungeon fail error:", error);
     return NextResponse.json(
       {
@@ -128,6 +122,8 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    await mongoSession.endSession();
+    if (mongoSession) {
+      await mongoSession.endSession();
+    }
   }
 }

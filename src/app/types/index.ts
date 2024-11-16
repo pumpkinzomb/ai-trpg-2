@@ -317,6 +317,7 @@ export interface DungeonState {
   logs: DungeonLog[];
   createdAt: Date;
   updatedAt: Date;
+  stageCompleted: boolean;
 }
 
 export interface EscapePenalties {

@@ -33,6 +33,8 @@ import {
   TrapResolution,
 } from "./DungeonDialogs";
 import { CharacterDeathCard } from "./CharacterDeathCard";
+import DungeonScene from "./DungeonScene";
+import StageCompletionCard from "./StageCompletionCard";
 
 type LoadingState = {
   init: boolean; // 초기 캐릭터 로딩
@@ -190,6 +192,45 @@ export function DungeonClient() {
     return null;
   };
 
+  const isStageCompleted = (
+    log: DungeonLog,
+    temporaryInventory: Array<{ itemId: string; logId: string }>
+  ): boolean => {
+    // 전투가 있는 경우
+    if (log.data?.enemies) {
+      if (!log.data.combat?.resolved || !log.data.combat.resolution?.victory) {
+        return false;
+      }
+    }
+
+    // 함정이 있는 경우
+    if (log.data?.trap) {
+      if (!log.data.trap.resolved) {
+        return false;
+      }
+    }
+
+    // 보상이 있는 경우, 모두 획득했는지 확인
+    if (log.data?.rewards) {
+      const hasUnlootedGold =
+        log.data.rewards.gold > 0 && !log.data.rewards.goldLooted;
+      const hasUnlootedItems = log.data.rewards.items?.some(
+        (item) =>
+          !isItemLootedFromSpecificLog(
+            item._id.toString(),
+            log._id.toString(),
+            temporaryInventory
+          )
+      );
+
+      if (hasUnlootedGold || hasUnlootedItems) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   const initializeDungeon = async (characterId: string) => {
     try {
       setLoadingState((prev) => ({ ...prev, dungeon: true }));
@@ -206,14 +247,24 @@ export function DungeonClient() {
 
       // 활성화된 던전이 있으면 해당 던전을 로드
       if (activeData.dungeon) {
-        setDungeonState(activeData.dungeon);
+        // 현재 로그의 완료 상태 확인
+        const currentLog =
+          activeData.dungeon.logs[activeData.dungeon.logs.length - 1];
+        const stageCompleted = currentLog
+          ? isStageCompleted(currentLog, activeData.dungeon.temporaryInventory)
+          : false;
+
+        setDungeonState({
+          ...activeData.dungeon,
+          stageCompleted,
+        });
+
         if (activeData.dungeon.playerHP <= 0) {
           setCharacterDead({
             dead: true,
             cause: determineDeathCause(activeData.dungeon.logs),
           });
         }
-        return;
         return;
       }
 
@@ -231,7 +282,12 @@ export function DungeonClient() {
       }
 
       const data = await response.json();
-      setDungeonState(data.dungeon);
+
+      // 새로운 던전은 항상 미완료 상태로 시작
+      setDungeonState({
+        ...data.dungeon,
+        stageCompleted: false,
+      });
     } catch (error) {
       console.error("Failed to initialize/load dungeon:", error);
       toast({
@@ -261,7 +317,10 @@ export function DungeonClient() {
 
     // 현재 로그에 루팅하지 않은 보상이 있는지 확인
     const currentLog = getCurrentLog();
-    if (currentLog && hasUnlootedRewards(currentLog)) {
+    if (
+      currentLog &&
+      hasUnlootedRewards(currentLog, dungeonState.temporaryInventory)
+    ) {
       setShowLootWarning(true);
       return;
     }
@@ -313,8 +372,21 @@ export function DungeonClient() {
     return "combat";
   };
 
+  const isItemLootedFromSpecificLog = (
+    itemId: string,
+    logId: string,
+    temporaryInventory: Array<{ itemId: string; logId: string }>
+  ): boolean => {
+    return temporaryInventory.some(
+      (loot) => loot.itemId === itemId && loot.logId === logId
+    );
+  };
+
   // 루팅 가능한 아이템이나 골드가 있는지 확인하는 함수
-  const hasUnlootedRewards = (log: DungeonLog) => {
+  const hasUnlootedRewards = (
+    log: DungeonLog,
+    temporaryInventory: Array<{ itemId: string; logId: string }>
+  ) => {
     if (!log.data?.rewards) return false;
 
     const hasUnlootedGold =
@@ -324,7 +396,7 @@ export function DungeonClient() {
         !isItemLootedFromSpecificLog(
           item._id.toString(),
           log._id.toString(),
-          dungeonState!
+          temporaryInventory
         )
     );
 
@@ -384,7 +456,20 @@ export function DungeonClient() {
       }
 
       const updatedDungeon = await response.json();
-      setDungeonState(updatedDungeon);
+      setDungeonState((prevState) => {
+        if (!prevState) return null;
+
+        const currentLog = getCurrentLog();
+        const stageCompleted = currentLog
+          ? isStageCompleted(currentLog, updatedDungeon.temporaryInventory)
+          : false;
+
+        return {
+          ...prevState,
+          ...updatedDungeon,
+          stageCompleted,
+        };
+      });
 
       toast({
         title: "골드 획득",
@@ -423,7 +508,20 @@ export function DungeonClient() {
       }
 
       const updatedDungeon = await response.json();
-      setDungeonState(updatedDungeon);
+      setDungeonState((prevState) => {
+        if (!prevState) return null;
+
+        const currentLog = getCurrentLog();
+        const stageCompleted = currentLog
+          ? isStageCompleted(currentLog, updatedDungeon.temporaryInventory)
+          : false;
+
+        return {
+          ...prevState,
+          ...updatedDungeon,
+          stageCompleted,
+        };
+      });
 
       // 현재 로그에서 아이템 정보 찾기
       const currentLog = updatedDungeon.logs[updatedDungeon.logs.length - 1];
@@ -468,9 +566,14 @@ export function DungeonClient() {
 
       setDungeonState((prevState) => {
         if (!prevState) return null;
+        const currentLog = logs[logs.length - 1];
+        const stageCompleted = currentLog
+          ? isStageCompleted(currentLog, temporaryInventory)
+          : false;
 
         return {
           ...prevState,
+          stageCompleted,
           logs,
           temporaryInventory,
           updatedAt: new Date(),
@@ -589,8 +692,20 @@ export function DungeonClient() {
       if (!response.ok) throw new Error("Failed to process combat result");
       const data = await response.json();
 
-      // 던전 상태 업데이트
-      setDungeonState(data.dungeon);
+      setDungeonState((prevState) => {
+        if (!prevState) return null;
+
+        const currentLog = getCurrentLog();
+        const stageCompleted = currentLog
+          ? isStageCompleted(currentLog, data.dungeon.temporaryInventory)
+          : false;
+
+        return {
+          ...prevState,
+          ...data.dungeon,
+          stageCompleted,
+        };
+      });
 
       if (!result.victory) {
         setCharacterDead({ dead: true, cause: "combat" });
@@ -644,7 +759,21 @@ export function DungeonClient() {
 
       if (!response.ok) throw new Error("Failed to process trap result");
       const data = await response.json();
-      setDungeonState(data.dungeon);
+
+      setDungeonState((prevState) => {
+        if (!prevState) return null;
+
+        const currentLog = getCurrentLog();
+        const stageCompleted = currentLog
+          ? isStageCompleted(currentLog, data.dungeon.temporaryInventory)
+          : false;
+
+        return {
+          ...prevState,
+          ...data.dungeon,
+          stageCompleted,
+        };
+      });
 
       toast({
         title: result.success ? "함정 회피 성공!" : "함정 회피 실패",
@@ -741,17 +870,6 @@ export function DungeonClient() {
   // 현재 활성화된 로그를 가져오는 함수
   const getCurrentLog = () => {
     return dungeonState?.logs[dungeonState.logs.length - 1];
-  };
-
-  const isItemLootedFromSpecificLog = (
-    itemId: string,
-    logId: string,
-    dungeonState: DungeonState
-  ): boolean => {
-    return dungeonState.temporaryInventory?.some(
-      (loot) =>
-        loot.itemId.toString() === itemId && loot.logId.toString() === logId
-    );
   };
 
   const isInCombat = (log: DungeonLog | undefined) => {
@@ -875,20 +993,11 @@ export function DungeonClient() {
                     <div className="space-y-4">
                       {/* 기본 설명과 이미지는 항상 표시 */}
                       {!showCombat && (
-                        <>
-                          <p className="text-lg">{currentLog.description}</p>
-                          {currentLog.image && (
-                            <div className="aspect-square w-full max-w-md mx-auto rounded-lg overflow-hidden">
-                              <img
-                                src={currentLog.image}
-                                alt="상황 이미지"
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          )}
-                        </>
+                        <DungeonScene
+                          description={currentLog.description}
+                          image={currentLog.image}
+                        />
                       )}
-
                       {/* 사망 상태 표시 */}
                       {CharacterDead.dead && (
                         <CharacterDeathCard
@@ -978,6 +1087,15 @@ export function DungeonClient() {
                               </>
                             )}
 
+                          {/* 스테이지 완료 상태 표시 */}
+                          {dungeonState.stageCompleted &&
+                            dungeonState.currentStage ===
+                              dungeonState.maxStages - 1 && (
+                              <StageCompletionCard
+                                onComplete={handleCompleteDungeon}
+                              />
+                            )}
+
                           {/* 전투/함정 결과 표시 */}
                           {(currentLog.data?.combat?.resolved ||
                             currentLog.data?.trap?.resolved) && (
@@ -1032,7 +1150,7 @@ export function DungeonClient() {
               <DungeonActionInput
                 value={userAction}
                 onChange={(value) => setUserAction(value)}
-                disabled={showCombat}
+                disabled={showCombat || dungeonState.stageCompleted}
                 isLoading={loadingState.action}
                 onSubmit={handleActionSubmit}
               />
@@ -1090,7 +1208,6 @@ export function DungeonClient() {
       {/* 탈출 결과 다이얼로그 */}
       <EscapeResultsDialog
         open={showEscapeResults}
-        onOpenChange={setShowEscapeResults}
         results={escapeResults}
         onClose={() => {
           setShowEscapeResults(false);

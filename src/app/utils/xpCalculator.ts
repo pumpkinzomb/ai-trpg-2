@@ -1,4 +1,4 @@
-import { IDungeonState } from "../models";
+import { DungeonState } from "../types";
 
 export function getBaseXPForLevel(level: number): number {
   // 레벨별 기본 경험치 계산
@@ -8,24 +8,28 @@ export function getBaseXPForLevel(level: number): number {
 
 // 던전 실패 시 경험치 계산 함수
 export function calculateFailureXP(
-  dungeon: IDungeonState,
+  dungeonData: {
+    currentStage: number;
+    maxStages: number;
+    logs: any[];
+  },
   characterLevel: number
 ): number {
   // 레벨별 기본 스테이지 경험치
   const baseXPPerStage = getBaseXPForLevel(characterLevel);
 
   // 현재까지 진행한 스테이지 수
-  const completedStages = dungeon.currentStage;
+  const completedStages = dungeonData.currentStage;
 
   // 던전 난이도에 따른 보정
   // recommendedLevel이 없으므로, 스테이지 수에 기반한 난이도 보정으로 변경
-  const difficultyMultiplier = Math.min(1.5, 1 + dungeon.maxStages / 10); // 최대 50% 보너스
+  const difficultyMultiplier = Math.min(1.5, 1 + dungeonData.maxStages / 10); // 최대 50% 보너스
 
   // 기본 경험치 계산
   let xp = baseXPPerStage * completedStages * difficultyMultiplier;
 
   // 보스 직전까지 진행했다면 추가 보너스
-  if (completedStages === dungeon.maxStages - 1) {
+  if (completedStages === dungeonData.maxStages - 1) {
     xp *= 1.5; // 50% 추가 보너스
   }
 
@@ -38,7 +42,7 @@ export function calculateFailureXP(
 
 // 던전 완료 시 경험치 계산 함수
 export function calculateCompletionXP(
-  dungeon: IDungeonState,
+  dungeon: DungeonState,
   characterLevel: number
 ): number {
   // 레벨별 기본 경험치

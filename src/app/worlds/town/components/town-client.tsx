@@ -344,38 +344,6 @@ export default function TownClient({
     return effectMap[effectType] || effectType;
   };
 
-  const MarketHeader = () => {
-    const marketInfo = MARKET_INFO[marketType];
-
-    return (
-      <div className="relative h-48 lg:h-64 overflow-hidden rounded-t-lg">
-        {marketImage && (
-          <img
-            src={marketImage}
-            alt="Market"
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/80 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-2xl font-bold text-white">
-              {marketInfo.title}
-            </h2>
-            <span
-              className={`px-2 py-1 rounded-full text-xs font-medium ${marketInfo.badgeColor}`}
-            >
-              {marketInfo.badge}
-            </span>
-          </div>
-          <p className="text-white/90 text-sm max-w-2xl">
-            {marketInfo.description}
-          </p>
-        </div>
-      </div>
-    );
-  };
-
   const renderPurchaseDialogContent = () => (
     <SelectContent>
       {characters.map((character) => {
@@ -479,7 +447,7 @@ export default function TownClient({
                     </div>
                     <div className="flex items-center gap-2">
                       <Coins className="h-4 w-4" />
-                      <span>{Math.floor(item.value * 0.6)} Gold/개</span>
+                      <span>{item.value} Gold/개</span>
                     </div>
                   </div>
 
@@ -574,7 +542,7 @@ export default function TownClient({
                       ) : (
                         <Coins className="h-4 w-4 mr-2" />
                       )}
-                      1개 판매 ({Math.floor(item.value * 0.6)} Gold)
+                      1개 판매 ({item.value} Gold)
                     </Button>
 
                     {item.count > 1 && (
@@ -594,8 +562,7 @@ export default function TownClient({
                         ) : (
                           <Coins className="h-4 w-4 mr-2" />
                         )}
-                        전체 판매 ({Math.floor(item.value * 0.6 * item.count)}{" "}
-                        Gold)
+                        전체 판매 ({Math.floor(item.value * item.count)} Gold)
                       </Button>
                     )}
                   </div>
@@ -631,7 +598,7 @@ export default function TownClient({
                 <img
                   src={marketImage}
                   alt="Market"
-                  className="w-full h-full object-contain hover:scale-105 transition-transform duration-300"
+                  className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
                 />
               </div>
               <div className="mt-4 bg-muted rounded-lg p-4">

@@ -90,7 +90,6 @@ export async function POST(req: NextRequest) {
         $set: {
           "logs.$.data.rewards.goldLooted": true,
           "logs.$.data.rewards.gold": 0,
-          playerHP: character.hp.current,
         },
       },
       {

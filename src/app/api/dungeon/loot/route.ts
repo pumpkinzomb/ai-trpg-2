@@ -96,9 +96,6 @@ export async function POST(req: NextRequest) {
       dungeonId,
       {
         ...updateQuery,
-        $set: {
-          playerHP: character.hp.current,
-        },
       },
       {
         new: true,

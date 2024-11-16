@@ -1,5 +1,5 @@
 import React from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +18,6 @@ export interface TrapResolution {
   description: string;
 }
 
-// 함정의 결과 설명을 위한 타입
 interface TrapOutcomes {
   success: {
     description: string;
@@ -28,7 +27,6 @@ interface TrapOutcomes {
   };
 }
 
-// 함정의 기본 정보를 나타내는 타입
 interface Trap {
   type: "dexterity" | "strength" | "constitution" | "intelligence" | "wisdom";
   dc: number;
@@ -68,13 +66,18 @@ export function TrapDialog({
   const [isRolling, setIsRolling] = useState(false);
   const [result, setResult] = useState<RollResult | null>(null);
 
+  // dialog가 열리면 자동으로 주사위 굴리기 시작
+  useEffect(() => {
+    if (open && !isRolling && !result) {
+      setIsRolling(true);
+    }
+  }, [open]);
+
   const handleRollComplete = async (roll: number) => {
     const finalRoll = roll + abilityModifier;
     const success = finalRoll >= trap.dc;
 
-    // hpChange가 음수일 때만 데미지로 간주
     const potentialDamage = Math.abs(effects.hpChange);
-    // 성공시 데미지 0, 실패시 전체 데미지
     const damage = success ? 0 : potentialDamage;
 
     const rollResult: RollResult = {
@@ -90,7 +93,6 @@ export function TrapDialog({
     setResult(rollResult);
     setIsRolling(false);
 
-    // 결과 처리
     await onResolutionComplete({
       success,
       roll: finalRoll,
@@ -99,58 +101,58 @@ export function TrapDialog({
     });
   };
 
+  const getAbilityTypeName = (type: string) => {
+    const typeMap: Record<string, string> = {
+      dexterity: "민첩",
+      strength: "근력",
+      constitution: "건강",
+      intelligence: "지능",
+      wisdom: "지혜",
+    };
+    return typeMap[type] || type;
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>함정 발견!</DialogTitle>
+          <DialogTitle>함정 판정</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <Card className="p-4">
-            <h3 className="font-medium mb-2">
-              {trap.type === "dexterity" && "민첩"}
-              {trap.type === "strength" && "근력"}
-              {trap.type === "constitution" && "건강"}
-              {trap.type === "intelligence" && "지능"}
-              {trap.type === "wisdom" && "지혜"} 판정
-            </h3>
-            <p className="text-sm text-muted-foreground mb-2">
-              DC {trap.dc} (수정치: {abilityModifier})
-            </p>
-            {!result && (
-              <div className="space-y-4">
-                {!isRolling ? (
-                  <Button
-                    onClick={() => setIsRolling(true)}
-                    className="w-full"
-                    variant="outline"
-                  >
-                    주사위 굴리기
-                  </Button>
-                ) : (
-                  <DiceRoll
-                    isRolling={isRolling}
-                    onRollEnd={handleRollComplete}
-                  />
-                )}
-              </div>
-            )}
-            {result && (
+            <div className="space-y-4">
               <div className="space-y-2">
-                <p>기본 굴림: {result.baseDice}</p>
-                <p>최종 판정: {result.roll}</p>
-                <p
-                  className={result.success ? "text-green-600" : "text-red-600"}
-                >
-                  {result.success ? "성공!" : "실패..."}
+                <h3 className="font-medium">
+                  {getAbilityTypeName(trap.type)} 판정
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  DC {trap.dc} (수정치: {abilityModifier})
                 </p>
-                {result.damage > 0 && (
-                  <p className="text-red-600">피해량: {result.damage}</p>
-                )}
-                <p className="mt-2">{result.description}</p>
               </div>
-            )}
+              {isRolling ? (
+                <DiceRoll
+                  isRolling={isRolling}
+                  onRollEnd={handleRollComplete}
+                />
+              ) : result ? (
+                <div className="space-y-2">
+                  <p>기본 굴림: {result.baseDice}</p>
+                  <p>최종 판정: {result.roll}</p>
+                  <p
+                    className={
+                      result.success ? "text-green-600" : "text-red-600"
+                    }
+                  >
+                    {result.success ? "성공!" : "실패..."}
+                  </p>
+                  {result.damage > 0 && (
+                    <p className="text-red-600">피해량: {result.damage}</p>
+                  )}
+                  <p className="mt-2">{result.description}</p>
+                </div>
+              ) : null}
+            </div>
           </Card>
         </div>
 

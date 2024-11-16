@@ -17,6 +17,7 @@ export function DungeonHeader({
   onComplete,
 }: DungeonHeaderProps) {
   const isLastStage = dungeonState.currentStage === dungeonState.maxStages - 1;
+  const canComplete = isLastStage && dungeonState.stageCompleted;
 
   return (
     <div className="flex flex-col space-y-4">
@@ -36,7 +37,7 @@ export function DungeonHeader({
             onClick={isLastStage ? onComplete : onEscape}
             className="shrink-0"
           >
-            {isLastStage ? (
+            {canComplete ? (
               <>
                 <Crown className="w-4 h-4 mr-2" />
                 던전 완료하기

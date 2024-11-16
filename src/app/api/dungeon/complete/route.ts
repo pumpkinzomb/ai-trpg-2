@@ -8,8 +8,7 @@ import { handleDungeonItems } from "@/app/utils/dungeonItems";
 import { processCombatExperience } from "@/app/utils/character";
 
 export async function POST(req: NextRequest) {
-  const mongoSession = await mongoose.startSession();
-  mongoSession.startTransaction();
+  let mongoSession = null;
 
   try {
     const session = await getServerSession(authOptions);
@@ -26,121 +25,110 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [dungeon, character] = await Promise.all([
-      Dungeon.findById(dungeonId).session(mongoSession),
-      Character.findById(characterId).session(mongoSession),
-    ]);
+    // Start transaction
+    mongoSession = await mongoose.startSession();
+    const result = await mongoSession.withTransaction(async (session) => {
+      // Find documents within transaction
+      const [dungeon, character] = await Promise.all([
+        Dungeon.findById(dungeonId).session(session),
+        Character.findById(characterId).session(session),
+      ]);
 
-    if (!dungeon || !dungeon.active) {
-      return NextResponse.json(
-        { error: "Active dungeon not found" },
-        { status: 404 }
-      );
-    }
-
-    if (dungeon.currentStage !== dungeon.maxStages - 1) {
-      return NextResponse.json(
-        { error: "Cannot complete dungeon before reaching final stage" },
-        { status: 400 }
-      );
-    }
-
-    if (!character) {
-      return NextResponse.json(
-        { error: "Character not found" },
-        { status: 404 }
-      );
-    }
-
-    // 완료 보상 계산
-    const completionXP = calculateCompletionXP(dungeon, character.level);
-
-    // 미수령 골드 계산
-    const unclaimedGold = dungeon.logs.reduce((total: number, log: any) => {
-      if (log.data?.rewards?.gold && !log.data.rewards.goldLooted) {
-        return total + log.data.rewards.gold;
+      if (!dungeon || !dungeon.active) {
+        throw new Error("Active dungeon not found");
       }
-      return total;
-    }, 0);
 
-    // 완료 보너스 계산
-    const bonusGold = Math.floor(
-      unclaimedGold * 0.1 +
-        dungeon.maxStages * 50 +
-        (dungeon.recommendedLevel > character.level ? 200 : 100)
-    );
+      if (dungeon.currentStage !== dungeon.maxStages - 1) {
+        throw new Error("Cannot complete dungeon before reaching final stage");
+      }
 
-    const totalGold = unclaimedGold + bonusGold;
+      if (!character) {
+        throw new Error("Character not found");
+      }
 
-    // 캐릭터 경험치 추가
-    character.experience += completionXP;
-    character.gold += totalGold;
+      // Calculate completion rewards
+      const completionXP = calculateCompletionXP(dungeon, character.level);
+      const unclaimedGold = dungeon.logs.reduce((total: number, log: any) => {
+        if (log.data?.rewards?.gold && !log.data.rewards.goldLooted) {
+          return total + log.data.rewards.gold;
+        }
+        return total;
+      }, 0);
 
-    // 레벨업 처리
-    const experienceResult = await processCombatExperience(
-      character,
-      mongoSession
-    );
+      const bonusGold = Math.floor(
+        unclaimedGold * 0.1 +
+          dungeon.maxStages * 50 +
+          (dungeon.recommendedLevel > character.level ? 200 : 100)
+      );
 
-    // 던전 상태 업데이트
-    await Dungeon.findByIdAndUpdate(
-      dungeonId,
-      {
-        active: false,
-        status: "completed",
-        completedAt: new Date(),
+      const totalGold = unclaimedGold + bonusGold;
+
+      // Update character
+      character.experience += completionXP;
+      character.gold += totalGold;
+
+      // Process combat experience
+      const experienceResult = await processCombatExperience(
+        character,
+        session
+      );
+
+      // Update dungeon
+      await Dungeon.findByIdAndUpdate(
+        dungeonId,
+        {
+          active: false,
+          status: "completed",
+          completedAt: new Date(),
+          rewards: {
+            xp: completionXP,
+            gold: totalGold,
+            bonusGold: bonusGold,
+          },
+          "logs.$[].data.rewards.goldLooted": true,
+          playerHP: character.hp.current,
+        },
+        { session }
+      );
+
+      // Handle inventory
+      await handleDungeonItems(dungeon, character, "complete", session);
+
+      // Get final character state
+      const savedCharacter = await Character.findById(character._id).session(
+        session
+      );
+
+      return {
+        success: true,
+        message: "Successfully completed dungeon",
         rewards: {
           xp: completionXP,
           gold: totalGold,
-          bonusGold: bonusGold,
+          breakdown: {
+            baseGold: unclaimedGold,
+            bonusGold: bonusGold,
+          },
+          items: dungeon.temporaryInventory.length,
         },
-        "logs.$[].data.rewards.goldLooted": true,
-        playerHP: character.hp.current,
-      },
-      {
-        new: true,
-        session: mongoSession,
-      }
-    );
-
-    // 인벤토리 처리
-    await handleDungeonItems(dungeon, character, "complete", mongoSession);
-
-    // 최종 캐릭터 상태 조회
-    const savedCharacter = await Character.findById(character._id).session(
-      mongoSession
-    );
-
-    await mongoSession.commitTransaction();
-
-    return NextResponse.json({
-      success: true,
-      message: "Successfully completed dungeon",
-      rewards: {
-        xp: completionXP,
-        gold: totalGold,
-        breakdown: {
-          baseGold: unclaimedGold,
-          bonusGold: bonusGold,
+        progress: {
+          currentStage: dungeon.currentStage,
+          maxStages: dungeon.maxStages,
+          recommendedLevel: dungeon.recommendedLevel,
+          playerLevel: savedCharacter.level,
         },
-        items: dungeon.temporaryInventory.length,
-      },
-      progress: {
-        currentStage: dungeon.currentStage,
-        maxStages: dungeon.maxStages,
-        recommendedLevel: dungeon.recommendedLevel,
-        playerLevel: savedCharacter.level,
-      },
-      levelUp: experienceResult.levelUps
-        ? {
-            levelsGained: experienceResult.levelUps.length,
-            details: experienceResult.levelUps,
-            nextLevelXP: experienceResult.nextLevelXP,
-          }
-        : null,
+        levelUp: experienceResult.levelUps
+          ? {
+              levelsGained: experienceResult.levelUps.length,
+              details: experienceResult.levelUps,
+              nextLevelXP: experienceResult.nextLevelXP,
+            }
+          : null,
+      };
     });
+
+    return NextResponse.json(result);
   } catch (error) {
-    await mongoSession.abortTransaction();
     console.error("Dungeon completion error:", error);
     return NextResponse.json(
       {
@@ -150,6 +138,8 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    await mongoSession.endSession();
+    if (mongoSession) {
+      await mongoSession.endSession();
+    }
   }
 }
