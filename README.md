@@ -42,7 +42,7 @@ project/
 │   └── utils/       # Utility functions
 ├── lib/
 │   ├── auth.ts      # Authentication configuration
-│   └── db.ts        # Database configuration
+│   └── mongodb.ts        # Database configuration
 └── public/          # Static assets
 ```
 
@@ -50,7 +50,7 @@ project/
 
 1. Clone the repository
 ```bash
-git clone [repository-url]
+git clone https://github.com/pumpkinzomb/ai-trpg-2
 ```
 
 2. Install dependencies
@@ -62,10 +62,12 @@ yarn install
 
 3. Set up environment variables
 ```env
-DATABASE_URL=your_mongodb_url
-NEXTAUTH_SECRET=your_nextauth_secret
+NEXTAUTH_SECRET=secret_key
+NEXTAUTH_URL=http://localhost:4999
+MONGODB_URI=mongodb_url
+HUGGINGFACE_API_TOKEN=your_hf_key
 OPENAI_API_KEY=your_openai_api_key
-FLUX_AI_API_KEY=your_flux_api_key
+NEXT_PUBLIC_BASE_URL=http://localhost:4999
 ```
 
 4. Run the development server
@@ -84,17 +86,13 @@ yarn dev
 - **Labor System**: Engage in work activities for rewards
 - **Real-time Image Generation**: Dynamic scene visualization
 
-## 📝 License
-
-[MIT License](LICENSE)
-
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
 
 ## 📧 Contact
 
-[Your Contact Information]
+pumpkinzomb@gmail.com
 
 ---
 Made with ❤️ and TypeScript
