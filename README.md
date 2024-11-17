@@ -1,36 +1,100 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI-Powered TRPG Game
 
-## Getting Started
+An interactive text-based RPG game powered by OpenAI and Flux AI, built with Next.js 14 and TypeScript.
 
-First, run the development server:
+## 🎮 Features
 
+- **AI Game Master**: OpenAI-powered dynamic storytelling and game progression
+- **Visual Generation**: Real-time game scene visualization using Flux AI
+- **Character Management**: Create and manage your unique characters
+- **Multiple Game Modes**:
+  - Dungeon Exploration
+  - Town & Shop System
+  - Labor System
+  - Character Creation & Development
+
+## 🛠 Tech Stack
+
+### Core Technologies
+- Next.js 14
+- TypeScript
+- MongoDB
+- shadcn/ui
+- Tailwind CSS
+
+### AI Integration
+- OpenAI API (Game Master)
+- Flux AI (Image Generation)
+
+### Authentication & Database
+- NextAuth.js
+- Auth0 Integration
+- MongoDB
+
+## 🏗 Project Structure
+
+```
+project/
+├── app/
+│   ├── api/         # API routes
+│   ├── components/  # Reusable components
+│   ├── models/      # MongoDB models
+│   └── utils/       # Utility functions
+├── lib/
+│   ├── auth.ts      # Authentication configuration
+│   └── db.ts        # Database configuration
+└── public/          # Static assets
+```
+
+## 🚀 Getting Started
+
+1. Clone the repository
+```bash
+git clone [repository-url]
+```
+
+2. Install dependencies
+```bash
+npm install
+# or
+yarn install
+```
+
+3. Set up environment variables
+```env
+DATABASE_URL=your_mongodb_url
+NEXTAUTH_SECRET=your_nextauth_secret
+OPENAI_API_KEY=your_openai_api_key
+FLUX_AI_API_KEY=your_flux_api_key
+```
+
+4. Run the development server
 ```bash
 npm run dev
 # or
 yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🎯 Current Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Authentication System**: User registration and login using Auth0
+- **Character System**: Create and manage game characters
+- **Dungeon System**: Explore dungeons with AI-driven narratives
+- **Town System**: Visit shops and interact with NPCs
+- **Labor System**: Engage in work activities for rewards
+- **Real-time Image Generation**: Dynamic scene visualization
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 📝 License
 
-## Learn More
+[MIT License](LICENSE)
 
-To learn more about Next.js, take a look at the following resources:
+## 🤝 Contributing
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Contributions, issues, and feature requests are welcome!
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 📧 Contact
 
-## Deploy on Vercel
+[Your Contact Information]
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+Made with ❤️ and TypeScript
