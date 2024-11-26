@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { RewardDialog } from "./RewardDialog";
-import { useRouter } from "next/navigation";
 import { Loader2, Timer, Coins, Dice6 } from "lucide-react";
 
 interface Character {
@@ -57,7 +56,6 @@ export function LaborClient({ laborImage }: LaborClientProps) {
   >(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  const router = useRouter();
   const [showRewardDialog, setShowRewardDialog] = useState(false);
 
   const getCharacterId = (character: Character) => character._id.toString();
@@ -266,18 +264,6 @@ export function LaborClient({ laborImage }: LaborClientProps) {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const collectReward = async () => {
-    if (!selectedCharacter || !isLaborCompleted()) {
-      toast({
-        variant: "destructive",
-        title: "오류",
-        description: "아직 작업이 완료되지 않았습니다.",
-      });
-      return;
-    }
-    setShowRewardDialog(true);
   };
 
   const handleCollectAndRest = async (
